@@ -1,0 +1,17 @@
+# Render configuration for backend
+services:
+  - type: web
+    name: mymenus-backend
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+databases:
+  - name: mymenus-db
+    plan: starter
+    databaseName: mymenus
+    user: mymenus_user

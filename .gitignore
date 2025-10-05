@@ -142,8 +142,8 @@ tmp/
 temp/
 
 # Prisma
-prisma/migrations/
-!prisma/migrations/.gitkeep
+# prisma/migrations/
+# !prisma/migrations/.gitkeep
 
 # Test files
 test-results/

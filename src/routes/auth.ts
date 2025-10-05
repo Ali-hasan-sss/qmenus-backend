@@ -146,7 +146,7 @@ export const registerUser = async (
         if (freeTrialPlan.duration === 0) {
           endDate.setFullYear(endDate.getFullYear() + 10);
         } else {
-          endDate.setDate(endDate.getDate() + freeTrialPlan.duration);
+        endDate.setDate(endDate.getDate() + freeTrialPlan.duration);
         }
 
         subscription = await tx.subscription.create({

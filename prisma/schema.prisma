@@ -1,0 +1,476 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  password         String
+  firstName        String
+  lastName         String
+  role             UserRole @default(OWNER)
+  isActive         Boolean  @default(true)
+  emailVerified    Boolean  @default(false)
+  verificationCode String?
+  verificationCodeExpires DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  restaurants    Restaurant[] @relation("RestaurantOwner")
+  cashierOrders  Order[]      @relation("OrderCashier")
+  createdPlans   Plan[]       @relation("PlanCreator")
+  notifications  Notification[]
+
+  @@map("users")
+}
+
+model Restaurant {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?
+  description String?
+  descriptionAr String?
+  logo        String?  // Restaurant logo URL
+  address     String?
+  phone       String?
+  email       String?
+  website     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // Relations
+  ownerId      String
+  owner        User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  subscriptions Subscription[]
+  theme        RestaurantTheme?
+  menuTheme    MenuTheme?
+  qrCodes      QRCode[]
+  menus        Menu[]
+  orders       Order[]
+  notifications Notification[]
+  invoices     Invoice[]
+
+  @@map("restaurants")
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?
+  description String?
+  descriptionAr String?
+  type        PlanType
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("USD")
+  duration    Int      // in days
+  maxTables   Int
+  maxMenus    Int      @default(1) // Currently always 1 (no multi-menu support)
+  maxCategories Int    @default(1) // Max categories allowed
+  maxItems    Int      @default(5) // Max items per category
+  canCustomizeTheme Boolean @default(false) // Can customize menu theme
+  features    String[] // JSON array of additional features
+  isActive    Boolean  @default(true)
+  isFree      Boolean  @default(false) // Is this a free trial plan
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  creatorId     String
+  creator       User          @relation("PlanCreator", fields: [creatorId], references: [id])
+  subscriptions Subscription[]
+  invoices      Invoice[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id          String            @id @default(cuid())
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime
+  endDate     DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relations
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  planId       String
+  plan         Plan       @relation(fields: [planId], references: [id])
+  invoices     Invoice[]
+
+  @@map("subscriptions")
+}
+
+model QRCode {
+  id           String   @id @default(cuid())
+  tableNumber  String
+  qrCode       String   @unique
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  orders       Order[]
+
+  @@map("qr_codes")
+}
+
+model Menu {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  categories   Category[]
+
+  @@map("menus")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  image       String?
+  nameAr      String?
+  description String?
+  descriptionAr String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  menuId String
+  menu   Menu       @relation(fields: [menuId], references: [id])
+  items  MenuItem[]
+
+  @@map("categories")
+}
+
+model MenuItem {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String?
+  description String?
+  descriptionAr String?
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("USD")
+  image       String?
+  sortOrder   Int      @default(0)
+  isAvailable Boolean  @default(true)
+  discount    Int      @default(0) // Discount percentage (0-100)
+  extras      Json?    // JSON for extra options
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+
+  @@map("menu_items")
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  orderType    OrderType   @default(DINE_IN)
+  tableNumber  String?
+  totalPrice   Decimal     @db.Decimal(10, 2)
+  currency     String      @default("USD")
+  status       OrderStatus @default(PENDING)
+  customerName String?
+  customerPhone String?
+  customerAddress String?
+  customerIP   String?
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  qrCodeId     String?
+  qrCode       QRCode?    @relation(fields: [qrCodeId], references: [id])
+  cashierId    String?
+  cashier      User?      @relation("OrderCashier", fields: [cashierId], references: [id])
+  items        OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  quantity  Int
+  price     Decimal @db.Decimal(10, 2)
+  notes     String?
+  extras    Json?   // JSON for extra options
+  
+  // Custom item fields (for services/fees added by restaurant)
+  customItemName   String? // Name for custom items (e.g., "Service Fee", "Delivery Fee")
+  customItemNameAr String? // Arabic name for custom items
+  isCustomItem     Boolean @default(false) // Flag to identify custom items
+
+  // Relations
+  orderId    String
+  order      Order     @relation(fields: [orderId], references: [id])
+  menuItemId String?   // Optional now - null for custom items
+  menuItem   MenuItem? @relation(fields: [menuItemId], references: [id])
+
+  @@map("order_items")
+}
+
+model RestaurantTheme {
+  id           String   @id @default(cuid())
+  primaryColor String   @default("#3B82F6")
+  secondaryColor String @default("#1E40AF")
+  fontFamily   String   @default("Inter")
+  logo         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  restaurantId String      @unique
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
+
+  @@map("restaurant_themes")
+}
+
+model MenuTheme {
+  id           String   @id @default(cuid())
+  
+  // Layout Settings
+  layoutType   String   @default("grid") // grid, list, card
+  showPrices   Boolean  @default(true)
+  showImages   Boolean  @default(true)
+  showDescriptions Boolean @default(true)
+  
+  // Color Scheme
+  primaryColor String   @default("#3B82F6")
+  secondaryColor String @default("#1E40AF")
+  backgroundColor String @default("#FFFFFF")
+  textColor    String   @default("#1F2937")
+  accentColor  String   @default("#F59E0B")
+  
+  // Color Opacity Settings
+  primaryColorOpacity Float @default(1.0)
+  secondaryColorOpacity Float @default(1.0)
+  backgroundColorOpacity Float @default(1.0)
+  textColorOpacity Float @default(1.0)
+  accentColorOpacity Float @default(1.0)
+  
+  // Typography
+  fontFamily   String   @default("Inter")
+  headingSize  String   @default("text-2xl")
+  bodySize     String   @default("text-base")
+  priceSize    String   @default("text-lg")
+  
+  // Spacing & Layout
+  cardPadding  String   @default("p-4")
+  cardMargin   String   @default("m-2")
+  borderRadius String   @default("rounded-lg")
+  
+  // Category Display
+  categoryStyle String  @default("tabs") // tabs, accordion, sidebar
+  showCategoryImages Boolean @default(false)
+  
+  // Item Display
+  itemLayout   String   @default("vertical") // vertical, horizontal
+  imageAspect  String   @default("square") // square, rectangle, circle
+  
+  // Background Image
+  backgroundImage String?  // URL of background image
+  backgroundOverlay String? // Overlay color for background (e.g., "rgba(0,0,0,0.3)")
+  backgroundPosition String @default("center") // background position
+  backgroundSize String @default("cover") // background size
+  backgroundRepeat String @default("no-repeat") // background repeat
+  
+  // Background Overlay Opacity
+  backgroundOverlayOpacity Float @default(0.5)
+
+  // Custom Background Image
+  customBackgroundImage String?  // URL of custom uploaded background image
+
+  // Additional Styling
+  customCSS    String?  // Custom CSS for advanced users
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations - One theme per restaurant
+  restaurantId String   @unique
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@map("menu_themes")
+}
+
+model Notification {
+  id           String           @id @default(cuid())
+  restaurantId String?
+  restaurant   Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  userId       String?          // For admin notifications
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  body         String
+  type         NotificationType @default(GENERAL)
+  isRead       Boolean          @default(false)
+  orderId      String?
+  createdAt    DateTime         @default(now())
+
+  @@index([restaurantId])
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Invoice {
+  id          String      @id @default(cuid())
+  invoiceNumber String    @unique // رقم الفاتورة
+  type        InvoiceType
+  status      InvoiceStatus @default(PENDING)
+  amount      Decimal     @db.Decimal(10, 2)
+  currency    String      @default("USD")
+  description String?     // وصف الفاتورة
+  notes       String?     // ملاحظات إضافية
+  
+  // تفاصيل العميل
+  customerName String     // اسم العميل (صاحب المطعم)
+  customerEmail String    // إيميل العميل
+  customerPhone String?   // رقم هاتف العميل
+  
+  // تفاصيل المطعم
+  restaurantName String   // اسم المطعم
+  restaurantAddress String? // عنوان المطعم
+  
+  // تفاصيل الاشتراك المرتبط
+  subscriptionId String?  // معرف الاشتراك (اختياري)
+  planId         String?  // معرف الخطة (اختياري)
+  planName       String?  // اسم الخطة
+  planDuration   Int?     // مدة الخطة بالأيام
+  
+  // تواريخ
+  issueDate      DateTime  @default(now()) // تاريخ إصدار الفاتورة
+  dueDate        DateTime? // تاريخ الاستحقاق
+  paidDate       DateTime? // تاريخ الدفع
+  
+  // معلومات إضافية
+  taxAmount      Decimal?  @db.Decimal(10, 2) // مبلغ الضريبة
+  discountAmount Decimal?  @db.Decimal(10, 2) // مبلغ الخصم
+  totalAmount    Decimal   @db.Decimal(10, 2) // المبلغ الإجمالي
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  restaurantId   String
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  plan           Plan? @relation(fields: [planId], references: [id])
+
+  @@map("invoices")
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  type      String   // restaurant_registered, subscription_created, subscription_expired, etc.
+  message   String   // Human readable message
+  metadata  Json?    // Additional data like restaurant name, owner name, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("activities")
+}
+
+
+// Enums
+enum UserRole {
+  OWNER
+  CASHIER
+  ADMIN
+}
+
+enum PlanType {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+
+
+enum NotificationType {
+  GENERAL
+  NEW_ORDER
+  ORDER_UPDATE
+  WELCOME
+  SUBSCRIPTION
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_EXPIRING
+  SUBSCRIPTION_EXPIRED
+  SUBSCRIPTION_CANCELLED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_UPGRADED
+  RESTAURANT_REGISTRATION
+  CANCELLATION
+  UPGRADE
+  ADMIN_NOTIFICATION
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  DELIVERY
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  RENEWAL
+  UPGRADE
+  REFUND
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  resetCode String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("password_resets")
+}

@@ -321,13 +321,6 @@ router.get("/incomplete/:restaurantId", async (req, res): Promise<any> => {
   try {
     const { restaurantId } = req.params;
     const { tableNumber } = req.query;
-    const customerIP =
-      req.ip ||
-      req.connection.remoteAddress ||
-      (req.connection as any).socket?.remoteAddress ||
-      req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
-      req.headers["x-real-ip"]?.toString() ||
-      "unknown";
 
     // For delivery orders (no table number), allow multiple orders
     // Return 404 immediately so customers can place new orders
@@ -341,7 +334,6 @@ router.get("/incomplete/:restaurantId", async (req, res): Promise<any> => {
     // For dine-in orders, check for incomplete order on specific table
     const whereClause: any = {
       restaurantId,
-      customerIP,
       tableNumber: tableNumber,
       status: {
         not: "COMPLETED",
@@ -404,19 +396,11 @@ router.get("/incomplete/:restaurantId", async (req, res): Promise<any> => {
 router.get("/track/:orderId", async (req, res): Promise<any> => {
   try {
     const { orderId } = req.params;
-    const customerIP =
-      req.ip ||
-      req.connection.remoteAddress ||
-      (req.connection as any).socket?.remoteAddress ||
-      req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
-      req.headers["x-real-ip"]?.toString() ||
-      "unknown";
 
-    // Find order and verify IP matches
+    // Find order (remove IP verification for better customer experience)
     const order = await prisma.order.findFirst({
       where: {
         id: orderId,
-        customerIP: customerIP,
       },
       include: {
         restaurant: {

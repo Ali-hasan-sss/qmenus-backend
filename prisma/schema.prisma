@@ -49,7 +49,7 @@ model Restaurant {
   updatedAt   DateTime @updatedAt
   // Relations
   ownerId      String
-  owner        User       @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  owner        User       @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   subscriptions Subscription[]
   theme        RestaurantTheme?
   menuTheme    MenuTheme?
@@ -102,7 +102,7 @@ model Subscription {
 
   // Relations
   restaurantId String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   planId       String
   plan         Plan       @relation(fields: [planId], references: [id])
   invoices     Invoice[]
@@ -120,7 +120,7 @@ model QRCode {
 
   // Relations
   restaurantId String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   orders       Order[]
 
   @@map("qr_codes")
@@ -136,7 +136,7 @@ model Menu {
 
   // Relations
   restaurantId String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   categories   Category[]
 
   @@map("menus")
@@ -203,7 +203,7 @@ model Order {
 
   // Relations
   restaurantId String
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   qrCodeId     String?
   qrCode       QRCode?    @relation(fields: [qrCodeId], references: [id])
   cashierId    String?
@@ -245,7 +245,7 @@ model RestaurantTheme {
 
   // Relations
   restaurantId String      @unique
-  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@map("restaurant_themes")
 }
@@ -312,7 +312,7 @@ model MenuTheme {
 
   // Relations - One theme per restaurant
   restaurantId String   @unique
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@map("menu_themes")
 }
@@ -376,7 +376,7 @@ model Invoice {
 
   // Relations
   restaurantId   String
-  restaurant     Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
   plan           Plan? @relation(fields: [planId], references: [id])
 

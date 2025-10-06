@@ -257,10 +257,11 @@ export const registerUser = async (
     }
 
     // Set httpOnly cookie
+    const isProd = process.env.NODE_ENV === "production";
     res.cookie("auth-token", token, {
       httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: "lax", // Allow cross-origin cookies for development
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
     });
@@ -271,6 +272,7 @@ export const registerUser = async (
         ? "User registered successfully. Please check your email for verification code."
         : "User registered successfully. Email verification may be delayed.",
       data: {
+        token,
         user: {
           id: result.user.id,
           email: result.user.email,
@@ -280,7 +282,8 @@ export const registerUser = async (
           emailVerified: result.user.emailVerified,
           restaurant: result.restaurant,
         },
-        requiresEmailVerification: true,
+        requiresEmailVerification:
+          process.env.SKIP_EMAIL_VERIFICATION !== "true",
         emailSent: emailSent,
       },
     });
@@ -358,10 +361,11 @@ export const loginUser = async (
     );
 
     // Set httpOnly cookie
+    const isProd = process.env.NODE_ENV === "production";
     res.cookie("auth-token", token, {
       httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: "lax", // Allow cross-origin cookies for development
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
     });

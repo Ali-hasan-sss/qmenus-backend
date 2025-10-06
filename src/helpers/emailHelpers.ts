@@ -3,16 +3,25 @@ import nodemailer from "nodemailer";
 // Email configuration
 const transporter = nodemailer.createTransport({
   service: "gmail",
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // true for 465, false for other ports
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASSWORD,
+  },
+  tls: {
+    rejectUnauthorized: false,
   },
 });
 
 // Verify email configuration
 console.log("🔍 Email configuration check:");
 console.log("EMAIL_USER:", process.env.EMAIL_USER ? "✅ Set" : "❌ Not set");
-console.log("EMAIL_PASSWORD:", process.env.EMAIL_PASSWORD ? "✅ Set" : "❌ Not set");
+console.log(
+  "EMAIL_PASSWORD:",
+  process.env.EMAIL_PASSWORD ? "✅ Set" : "❌ Not set"
+);
 
 transporter.verify((error, success) => {
   if (error) {
@@ -32,7 +41,7 @@ export function generateResetCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Send verification email
+// Send verification email with timeout
 export async function sendVerificationEmail(
   email: string,
   firstName: string,
@@ -77,16 +86,22 @@ export async function sendVerificationEmail(
       `,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${email}`);
+    // Add timeout for email sending
+    const emailPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email timeout")), 10000)
+    );
+
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log(`✅ Verification email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Error sending verification email:", error);
+    console.error("❌ Error sending verification email:", error);
     return false;
   }
 }
 
-// Send password reset email
+// Send password reset email with timeout
 export async function sendPasswordResetEmail(
   email: string,
   firstName: string,
@@ -95,6 +110,7 @@ export async function sendPasswordResetEmail(
   // Check if email configuration is available
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log("⚠️ Email configuration not available, skipping email send");
+    console.log("📧 Reset code for", email, ":", resetCode);
     return false;
   }
 
@@ -130,21 +146,34 @@ export async function sendPasswordResetEmail(
       `,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Password reset email sent to ${email}`);
+    // Add timeout for email sending
+    const emailPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email timeout")), 10000)
+    );
+
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log(`✅ Password reset email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Error sending password reset email:", error);
+    console.error("❌ Error sending password reset email:", error);
     return false;
   }
 }
 
-// Send English verification email
+// Send English verification email with timeout
 export async function sendVerificationEmailEN(
   email: string,
   firstName: string,
   verificationCode: string
 ): Promise<boolean> {
+  // Check if email configuration is available
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log("⚠️ Email configuration not available, skipping email send");
+    console.log("📧 Verification code for", email, ":", verificationCode);
+    return false;
+  }
+
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -177,21 +206,34 @@ export async function sendVerificationEmailEN(
       `,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Verification email sent to ${email}`);
+    // Add timeout for email sending
+    const emailPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email timeout")), 10000)
+    );
+
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log(`✅ Verification email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Error sending verification email:", error);
+    console.error("❌ Error sending verification email:", error);
     return false;
   }
 }
 
-// Send English password reset email
+// Send English password reset email with timeout
 export async function sendPasswordResetEmailEN(
   email: string,
   firstName: string,
   resetCode: string
 ): Promise<boolean> {
+  // Check if email configuration is available
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log("⚠️ Email configuration not available, skipping email send");
+    console.log("📧 Reset code for", email, ":", resetCode);
+    return false;
+  }
+
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -224,11 +266,17 @@ export async function sendPasswordResetEmailEN(
       `,
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`Password reset email sent to ${email}`);
+    // Add timeout for email sending
+    const emailPromise = transporter.sendMail(mailOptions);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Email timeout")), 10000)
+    );
+
+    await Promise.race([emailPromise, timeoutPromise]);
+    console.log(`✅ Password reset email sent to ${email}`);
     return true;
   } catch (error) {
-    console.error("Error sending password reset email:", error);
+    console.error("❌ Error sending password reset email:", error);
     return false;
   }
 }

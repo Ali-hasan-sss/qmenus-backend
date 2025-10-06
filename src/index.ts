@@ -38,6 +38,9 @@ const server = createServer(app);
 
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy for Render (fixes rate limiting issues)
+app.set("trust proxy", 1);
+
 // CORS configuration - Allow only FRONTEND_URL origin
 // Secure configuration for production use
 

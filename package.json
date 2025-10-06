@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "nodemon src/index.ts",
     "build": "tsc",
-    "start": "npx prisma migrate deploy && npm run db:seed && node dist/index.js",
-    "start:prod": "npx prisma migrate deploy && npm run db:seed && node dist/index.js",
+    "start": "npx prisma migrate deploy && npx prisma db seed && node dist/index.js",
+    "start:prod": "npx prisma migrate deploy && npx prisma db seed && node dist/index.js",
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
@@ -15,7 +15,7 @@
     "postinstall": "prisma generate"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

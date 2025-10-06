@@ -19,8 +19,11 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.9",
+    "@types/jsonwebtoken": "^9.0.5",
     "@types/node-cron": "^3.0.11",
+    "@types/qrcode": "^1.5.5",
     "@types/nodemailer": "^7.0.2",
     "bcryptjs": "^2.4.3",
     "cloudinary": "^1.41.3",
@@ -43,14 +46,11 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
-    "@types/jsonwebtoken": "^9.0.5",
     "@types/morgan": "^1.9.9",
     "@types/multer": "^1.4.13",
     "@types/node": "^20.19.17",
-    "@types/qrcode": "^1.5.5",
     "nodemon": "^3.0.2",
     "prisma": "^5.7.1",
     "ts-node": "^10.9.2",

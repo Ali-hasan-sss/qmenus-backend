@@ -81,7 +81,7 @@ export const registerUser = async (
           role: role || "OWNER",
           verificationCode,
           verificationCodeExpires,
-          emailVerified: false,
+          emailVerified: process.env.SKIP_EMAIL_VERIFICATION === "true", // Auto-verify in production
         },
       });
 
@@ -335,8 +335,8 @@ export const loginUser = async (
       });
     }
 
-    // Check if email is verified
-    if (!user.emailVerified) {
+    // Check if email is verified (skip in production if SKIP_EMAIL_VERIFICATION is true)
+    if (!user.emailVerified && process.env.SKIP_EMAIL_VERIFICATION !== "true") {
       return res.status(403).json({
         success: false,
         message:

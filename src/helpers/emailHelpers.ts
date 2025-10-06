@@ -10,6 +10,10 @@ const transporter = nodemailer.createTransport({
 });
 
 // Verify email configuration
+console.log("🔍 Email configuration check:");
+console.log("EMAIL_USER:", process.env.EMAIL_USER ? "✅ Set" : "❌ Not set");
+console.log("EMAIL_PASSWORD:", process.env.EMAIL_PASSWORD ? "✅ Set" : "❌ Not set");
+
 transporter.verify((error, success) => {
   if (error) {
     console.error("❌ Email configuration error:", error);
@@ -37,6 +41,7 @@ export async function sendVerificationEmail(
   // Check if email configuration is available
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log("⚠️ Email configuration not available, skipping email send");
+    console.log("📧 Verification code for", email, ":", verificationCode);
     return false;
   }
 

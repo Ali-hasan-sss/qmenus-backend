@@ -9,6 +9,15 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Verify email configuration
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ Email configuration error:", error);
+  } else {
+    console.log("✅ Email server is ready to send messages");
+  }
+});
+
 // Generate verification code
 export function generateVerificationCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -25,6 +34,12 @@ export async function sendVerificationEmail(
   firstName: string,
   verificationCode: string
 ): Promise<boolean> {
+  // Check if email configuration is available
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log("⚠️ Email configuration not available, skipping email send");
+    return false;
+  }
+
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -72,6 +87,12 @@ export async function sendPasswordResetEmail(
   firstName: string,
   resetCode: string
 ): Promise<boolean> {
+  // Check if email configuration is available
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log("⚠️ Email configuration not available, skipping email send");
+    return false;
+  }
+
   try {
     const mailOptions = {
       from: process.env.EMAIL_USER,

@@ -146,7 +146,7 @@ export const registerUser = async (
         if (freeTrialPlan.duration === 0) {
           endDate.setFullYear(endDate.getFullYear() + 10);
         } else {
-        endDate.setDate(endDate.getDate() + freeTrialPlan.duration);
+          endDate.setDate(endDate.getDate() + freeTrialPlan.duration);
         }
 
         subscription = await tx.subscription.create({
@@ -238,8 +238,9 @@ export const registerUser = async (
     }
 
     // Send verification email
+    let emailSent = false;
     try {
-      const emailSent = await sendVerificationEmail(
+      emailSent = await sendVerificationEmail(
         result.user.email,
         result.user.firstName,
         verificationCode
@@ -252,6 +253,7 @@ export const registerUser = async (
       }
     } catch (error) {
       console.error("❌ Error sending verification email:", error);
+      // Don't fail registration if email fails
     }
 
     // Set httpOnly cookie
@@ -265,8 +267,9 @@ export const registerUser = async (
 
     res.status(201).json({
       success: true,
-      message:
-        "User registered successfully. Please check your email for verification code.",
+      message: emailSent
+        ? "User registered successfully. Please check your email for verification code."
+        : "User registered successfully. Email verification may be delayed.",
       data: {
         user: {
           id: result.user.id,
@@ -278,6 +281,7 @@ export const registerUser = async (
           restaurant: result.restaurant,
         },
         requiresEmailVerification: true,
+        emailSent: emailSent,
       },
     });
   } catch (error) {

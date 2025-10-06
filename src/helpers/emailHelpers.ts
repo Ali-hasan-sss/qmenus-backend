@@ -1,35 +1,15 @@
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-// Email configuration
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false, // true for 465, false for other ports
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-  tls: {
-    rejectUnauthorized: false,
-  },
-});
+// Initialize Resend
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Verify email configuration
 console.log("🔍 Email configuration check:");
-console.log("EMAIL_USER:", process.env.EMAIL_USER ? "✅ Set" : "❌ Not set");
 console.log(
-  "EMAIL_PASSWORD:",
-  process.env.EMAIL_PASSWORD ? "✅ Set" : "❌ Not set"
+  "RESEND_API_KEY:",
+  process.env.RESEND_API_KEY ? "✅ Set" : "❌ Not set"
 );
-
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ Email configuration error:", error);
-  } else {
-    console.log("✅ Email server is ready to send messages");
-  }
-});
+console.log("EMAIL_FROM:", process.env.EMAIL_FROM ? "✅ Set" : "❌ Not set");
 
 // Generate verification code
 export function generateVerificationCode(): string {
@@ -41,23 +21,23 @@ export function generateResetCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Send verification email with timeout
+// Send verification email using Resend
 export async function sendVerificationEmail(
   email: string,
   firstName: string,
   verificationCode: string
 ): Promise<boolean> {
-  // Check if email configuration is available
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log("⚠️ Email configuration not available, skipping email send");
+  // Check if Resend configuration is available
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    console.log("⚠️ Resend configuration not available, skipping email send");
     console.log("📧 Verification code for", email, ":", verificationCode);
     return false;
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: [email],
       subject: "تحقق من بريدك الإلكتروني - QMenus",
       html: `
         <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
@@ -73,7 +53,7 @@ export async function sendVerificationEmail(
             </div>
             
             <p style="font-size: 14px; color: #666; line-height: 1.6;">
-              هذا الرمز صالح لمدة 24 ساعة. إذا لم تطلب هذا التحقق، يرجى تجاهل هذا البريد الإلكتروني.
+              هذا الرمز صالح لمدة 15 دقيقة. إذا لم تطلب هذا التحقق، يرجى تجاهل هذا البريد الإلكتروني.
             </p>
             
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
@@ -84,16 +64,14 @@ export async function sendVerificationEmail(
           </div>
         </div>
       `,
-    };
+    });
 
-    // Add timeout for email sending
-    const emailPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Email timeout")), 10000)
-    );
+    if (error) {
+      console.error("❌ Error sending verification email:", error);
+      return false;
+    }
 
-    await Promise.race([emailPromise, timeoutPromise]);
-    console.log(`✅ Verification email sent to ${email}`);
+    console.log(`✅ Verification email sent to ${email}`, data?.id);
     return true;
   } catch (error) {
     console.error("❌ Error sending verification email:", error);
@@ -101,23 +79,23 @@ export async function sendVerificationEmail(
   }
 }
 
-// Send password reset email with timeout
+// Send password reset email using Resend
 export async function sendPasswordResetEmail(
   email: string,
   firstName: string,
   resetCode: string
 ): Promise<boolean> {
-  // Check if email configuration is available
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log("⚠️ Email configuration not available, skipping email send");
+  // Check if Resend configuration is available
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    console.log("⚠️ Resend configuration not available, skipping email send");
     console.log("📧 Reset code for", email, ":", resetCode);
     return false;
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: [email],
       subject: "إعادة تعيين كلمة المرور - QMenus",
       html: `
         <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
@@ -144,16 +122,14 @@ export async function sendPasswordResetEmail(
           </div>
         </div>
       `,
-    };
+    });
 
-    // Add timeout for email sending
-    const emailPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Email timeout")), 10000)
-    );
+    if (error) {
+      console.error("❌ Error sending password reset email:", error);
+      return false;
+    }
 
-    await Promise.race([emailPromise, timeoutPromise]);
-    console.log(`✅ Password reset email sent to ${email}`);
+    console.log(`✅ Password reset email sent to ${email}`, data?.id);
     return true;
   } catch (error) {
     console.error("❌ Error sending password reset email:", error);
@@ -161,23 +137,23 @@ export async function sendPasswordResetEmail(
   }
 }
 
-// Send English verification email with timeout
+// Send English verification email using Resend
 export async function sendVerificationEmailEN(
   email: string,
   firstName: string,
   verificationCode: string
 ): Promise<boolean> {
-  // Check if email configuration is available
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log("⚠️ Email configuration not available, skipping email send");
+  // Check if Resend configuration is available
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    console.log("⚠️ Resend configuration not available, skipping email send");
     console.log("📧 Verification code for", email, ":", verificationCode);
     return false;
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: [email],
       subject: "Verify Your Email - QMenus",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
@@ -193,7 +169,7 @@ export async function sendVerificationEmailEN(
             </div>
             
             <p style="font-size: 14px; color: #666; line-height: 1.6;">
-              This code is valid for 24 hours. If you didn't request this verification, please ignore this email.
+              This code is valid for 15 minutes. If you didn't request this verification, please ignore this email.
             </p>
             
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
@@ -204,16 +180,14 @@ export async function sendVerificationEmailEN(
           </div>
         </div>
       `,
-    };
+    });
 
-    // Add timeout for email sending
-    const emailPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Email timeout")), 10000)
-    );
+    if (error) {
+      console.error("❌ Error sending verification email:", error);
+      return false;
+    }
 
-    await Promise.race([emailPromise, timeoutPromise]);
-    console.log(`✅ Verification email sent to ${email}`);
+    console.log(`✅ Verification email sent to ${email}`, data?.id);
     return true;
   } catch (error) {
     console.error("❌ Error sending verification email:", error);
@@ -221,23 +195,23 @@ export async function sendVerificationEmailEN(
   }
 }
 
-// Send English password reset email with timeout
+// Send English password reset email using Resend
 export async function sendPasswordResetEmailEN(
   email: string,
   firstName: string,
   resetCode: string
 ): Promise<boolean> {
-  // Check if email configuration is available
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log("⚠️ Email configuration not available, skipping email send");
+  // Check if Resend configuration is available
+  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
+    console.log("⚠️ Resend configuration not available, skipping email send");
     console.log("📧 Reset code for", email, ":", resetCode);
     return false;
   }
 
   try {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
+    const { data, error } = await resend.emails.send({
+      from: process.env.EMAIL_FROM,
+      to: [email],
       subject: "Reset Your Password - QMenus",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9;">
@@ -264,16 +238,14 @@ export async function sendPasswordResetEmailEN(
           </div>
         </div>
       `,
-    };
+    });
 
-    // Add timeout for email sending
-    const emailPromise = transporter.sendMail(mailOptions);
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Email timeout")), 10000)
-    );
+    if (error) {
+      console.error("❌ Error sending password reset email:", error);
+      return false;
+    }
 
-    await Promise.race([emailPromise, timeoutPromise]);
-    console.log(`✅ Password reset email sent to ${email}`);
+    console.log(`✅ Password reset email sent to ${email}`, data?.id);
     return true;
   } catch (error) {
     console.error("❌ Error sending password reset email:", error);

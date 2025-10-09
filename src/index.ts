@@ -167,12 +167,6 @@ server.listen(PORT, () => {
       process.env.FRONTEND_URL || "http://localhost:3000"
     }`
   );
-  console.log(`🔒 Security: Restricted access to authorized domain only`);
-  console.log(`📡 API URL: http://0.0.0.0:${PORT}/api`);
-  console.log(`🔌 Socket URL: http://0.0.0.0:${PORT}`);
-  console.log(
-    `📋 Public Menu URL: http://0.0.0.0:${PORT}/api/public/menu/RESTAURANT_ID/categories`
-  );
 
   // Schedule daily subscription checks at 9:00 AM Damascus time
   const dailyCheckTask = cron.schedule(

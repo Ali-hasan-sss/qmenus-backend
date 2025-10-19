@@ -14,6 +14,7 @@ import {
   restaurantIdSchema,
 } from "../validators/menuThemeValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
+import { DEFAULT_THEME } from "../constants/defaultTheme";
 
 const router = express.Router();
 
@@ -36,6 +37,7 @@ router.get(
       if (!theme) {
         theme = await prisma.menuTheme.create({
           data: {
+            ...DEFAULT_THEME,
             restaurantId,
           },
         });
@@ -73,9 +75,10 @@ router.put(
       });
 
       if (!theme) {
-        // Create new theme
+        // Create new theme with default values
         theme = await prisma.menuTheme.create({
           data: {
+            ...DEFAULT_THEME,
             ...updateData,
             restaurantId,
           },
@@ -145,30 +148,7 @@ router.get("/public/:restaurantId", async (req, res): Promise<any> => {
     });
 
     // If no theme exists, return default theme
-    const defaultTheme = {
-      id: "default",
-      layoutType: "grid",
-      showPrices: true,
-      showImages: true,
-      showDescriptions: true,
-      primaryColor: "#3B82F6",
-      secondaryColor: "#1E40AF",
-      backgroundColor: "#FFFFFF",
-      textColor: "#1F2937",
-      accentColor: "#F59E0B",
-      fontFamily: "Inter",
-      headingSize: "text-2xl",
-      bodySize: "text-base",
-      priceSize: "text-lg",
-      cardPadding: "p-4",
-      cardMargin: "m-2",
-      borderRadius: "rounded-lg",
-      categoryStyle: "tabs",
-      showCategoryImages: false,
-      itemLayout: "vertical",
-      imageAspect: "square",
-      customCSS: null,
-    };
+    const defaultTheme = DEFAULT_THEME;
 
     res.json({
       success: true,
@@ -209,8 +189,8 @@ router.post(
           showPrices: true,
           showImages: true,
           showDescriptions: true,
-          primaryColor: "#3B82F6",
-          secondaryColor: "#1E40AF",
+          primaryColor: "#f6b23c",
+          secondaryColor: "#27ae1e",
           backgroundColor: "#FFFFFF",
           textColor: "#1F2937",
           accentColor: "#F59E0B",
@@ -286,9 +266,10 @@ router.post(
       });
 
       if (!theme) {
-        // Create new theme
+        // Create new theme with default values
         theme = await prisma.menuTheme.create({
           data: {
+            ...DEFAULT_THEME,
             ...template,
             restaurantId,
           },
@@ -328,8 +309,8 @@ router.get("/templates/available", async (req, res): Promise<any> => {
         descriptionAr: "تصميم نظيف وعصري مع تخطيط الشبكة",
         preview: {
           layoutType: "grid",
-          primaryColor: "#3B82F6",
-          secondaryColor: "#1E40AF",
+          primaryColor: "#f6b23c",
+          secondaryColor: "#27ae1e",
           backgroundColor: "#FFFFFF",
           fontFamily: "Inter",
         },

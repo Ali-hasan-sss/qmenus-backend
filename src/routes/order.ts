@@ -11,6 +11,10 @@ import {
   updateOrderStatusSchema,
 } from "../validators/orderValidators";
 import { io } from "../index";
+import {
+  generateKitchenWhatsAppMessage,
+  generateWhatsAppURL,
+} from "../helpers/whatsappHelper";
 
 // Helper function to extract extras names for notes
 const getExtrasNamesForNotes = (
@@ -1109,14 +1113,17 @@ router.get(
       res.json({
         success: true,
         data: {
-          orderStats: orderStats.reduce((acc, stat) => {
-            acc[stat.status] = stat._count.id;
-            return acc;
-          }, {} as Record<string, number>),
+          orderStats: orderStats.reduce(
+            (acc: Record<string, number>, stat: any) => {
+              acc[stat.status] = stat._count.id;
+              return acc;
+            },
+            {}
+          ),
           revenue: revenue._sum.totalPrice || 0,
           averageOrderValue: avgOrderValue._avg.totalPrice || 0,
           totalOrders: orderStats.reduce(
-            (sum, stat) => sum + stat._count.id,
+            (sum: number, stat: any) => sum + stat._count.id,
             0
           ),
           ordersByHour,
@@ -1196,6 +1203,93 @@ router.get(
       });
     } catch (error) {
       console.error("Get table orders error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Generate WhatsApp URL for sending order to kitchen
+router.get(
+  "/:id/whatsapp-url",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const { lang } = req.query;
+      const restaurantId = req.user!.restaurantId!;
+
+      // Get order with items
+      const order = await prisma.order.findFirst({
+        where: {
+          id,
+          restaurantId,
+        },
+        include: {
+          items: {
+            include: {
+              menuItem: {
+                select: {
+                  id: true,
+                  name: true,
+                  nameAr: true,
+                  extras: true,
+                },
+              },
+            },
+          },
+          restaurant: {
+            select: {
+              kitchenWhatsApp: true,
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      // Generate WhatsApp message
+      const isRTL = lang === "ar";
+
+      // Debug: Log order items
+      console.log(
+        "Order items for WhatsApp:",
+        JSON.stringify(order.items, null, 2)
+      );
+
+      // Check if kitchen WhatsApp is configured
+      if (!order.restaurant.kitchenWhatsApp) {
+        return res.status(400).json({
+          success: false,
+          message: isRTL
+            ? "لم يتم تكوين رقم واتساب المطبخ. يرجى إضافته في إعدادات المطعم."
+            : "Kitchen WhatsApp is not configured. Please add it in restaurant settings.",
+        });
+      }
+      const message = generateKitchenWhatsAppMessage(order, isRTL);
+      console.log("Generated WhatsApp message:", message);
+      const whatsappURL = generateWhatsAppURL(
+        order.restaurant.kitchenWhatsApp,
+        message
+      );
+
+      res.json({
+        success: true,
+        data: {
+          whatsappURL,
+          message,
+        },
+      });
+    } catch (error) {
+      console.error("Generate WhatsApp URL error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

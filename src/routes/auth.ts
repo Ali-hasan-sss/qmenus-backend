@@ -26,11 +26,12 @@ import {
   generateResetCode,
   sendVerificationEmail,
   sendPasswordResetEmail,
+  hashCode,
 } from "../helpers/emailHelpers";
 
 const router = express.Router();
 
-// Register new user
+// Register new user (enforce pre-verified email)
 export const registerUser = async (
   req: AuthRequest,
   res: Response
@@ -61,13 +62,26 @@ export const registerUser = async (
       });
     }
 
+    // Ensure email has been verified via EmailVerification table
+    const emailVerification = await prisma.emailVerification.findUnique({
+      where: { email },
+    });
+
+    if (
+      !emailVerification ||
+      emailVerification.verified !== true ||
+      (emailVerification.expiresAt < new Date() && !emailVerification.verified)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Email not verified. Please verify your email before creating an account.",
+      });
+    }
+
     // Hash password
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // Generate verification code
-    const verificationCode = generateVerificationCode();
-    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
     // Create user and restaurant in a transaction
     const result = await prisma.$transaction(async (tx) => {
@@ -79,9 +93,7 @@ export const registerUser = async (
           firstName,
           lastName,
           role: role || "OWNER",
-          verificationCode,
-          verificationCodeExpires,
-          emailVerified: process.env.SKIP_EMAIL_VERIFICATION === "true", // Auto-verify in production
+          emailVerified: true,
         },
       });
 
@@ -237,25 +249,6 @@ export const registerUser = async (
       console.log("⚠️ No restaurant found in result");
     }
 
-    // Send verification email
-    let emailSent = false;
-    try {
-      emailSent = await sendVerificationEmail(
-        result.user.email,
-        result.user.firstName,
-        verificationCode
-      );
-
-      if (emailSent) {
-        console.log("✅ Verification email sent successfully");
-      } else {
-        console.log("⚠️ Failed to send verification email");
-      }
-    } catch (error) {
-      console.error("❌ Error sending verification email:", error);
-      // Don't fail registration if email fails
-    }
-
     // Set httpOnly cookie
     const isProd = process.env.NODE_ENV === "production";
     res.cookie("auth-token", token, {
@@ -268,9 +261,7 @@ export const registerUser = async (
 
     res.status(201).json({
       success: true,
-      message: emailSent
-        ? "User registered successfully. Please check your email for verification code."
-        : "User registered successfully. Email verification may be delayed.",
+      message: "User registered successfully.",
       data: {
         token,
         user: {
@@ -282,9 +273,7 @@ export const registerUser = async (
           emailVerified: result.user.emailVerified,
           restaurant: result.restaurant,
         },
-        requiresEmailVerification:
-          process.env.SKIP_EMAIL_VERIFICATION !== "true",
-        emailSent: emailSent,
+        requiresEmailVerification: false,
       },
     });
   } catch (error) {
@@ -731,29 +720,24 @@ export const verifyEmail = async (
 ): Promise<any> => {
   try {
     const { email, verificationCode } = req.body;
-
-    // Find user
-    const user = await prisma.user.findUnique({
+    // Find pending email verification record
+    const pending = await prisma.emailVerification.findUnique({
       where: { email },
     });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+    if (!pending) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Verification request not found" });
     }
 
-    // Check if email is already verified
-    if (user.emailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is already verified",
-      });
+    if (pending.verified) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Email is already verified" });
     }
 
-    // Check verification code
-    if (!user.verificationCode || user.verificationCode !== verificationCode) {
+    const hashedInput = hashCode(verificationCode);
+    if (!pending.code || pending.code !== hashedInput) {
       return res.status(400).json({
         success: false,
         message: "Invalid verification code",
@@ -761,38 +745,22 @@ export const verifyEmail = async (
     }
 
     // Check if code is expired
-    if (
-      !user.verificationCodeExpires ||
-      user.verificationCodeExpires < new Date()
-    ) {
+    if (!pending.expiresAt || pending.expiresAt < new Date()) {
       return res.status(400).json({
         success: false,
         message: "Verification code has expired",
       });
     }
 
-    // Update user to verified
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerified: true,
-        verificationCode: null,
-        verificationCodeExpires: null,
-      },
+    // Mark email as verified (no user yet)
+    await prisma.emailVerification.update({
+      where: { email },
+      data: { verified: true, verifiedAt: new Date() },
     });
 
     res.json({
       success: true,
       message: "Email verified successfully",
-      data: {
-        user: {
-          id: updatedUser.id,
-          email: updatedUser.email,
-          firstName: updatedUser.firstName,
-          lastName: updatedUser.lastName,
-          emailVerified: updatedUser.emailVerified,
-        },
-      },
     });
   } catch (error) {
     console.error("Verify email error:", error);
@@ -809,45 +777,48 @@ export const resendVerificationCode = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email } = req.body;
+    const { email, firstName } = req.body;
 
-    // Find user
-    const user = await prisma.user.findUnique({
+    // Enforce 10-minute cooldown from last update
+    const existing = await prisma.emailVerification.findUnique({
       where: { email },
     });
-
-    if (!user) {
-      return res.status(404).json({
+    if (
+      existing &&
+      existing.updatedAt &&
+      existing.updatedAt > new Date(Date.now() - 10 * 60 * 1000)
+    ) {
+      return res.status(429).json({
         success: false,
-        message: "User not found",
+        message: "Please wait 10 minutes before requesting a new code",
       });
     }
 
-    // Check if email is already verified
-    if (user.emailVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is already verified",
-      });
-    }
-
-    // Generate new verification code
+    // Generate new verification code (10 minutes validity)
     const verificationCode = generateVerificationCode();
-    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+    const hashed = hashCode(verificationCode);
 
-    // Update user with new verification code
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        verificationCode,
-        verificationCodeExpires,
+    // Upsert into EmailVerification table (store hashed code)
+    await prisma.emailVerification.upsert({
+      where: { email },
+      create: {
+        email,
+        code: hashed,
+        expiresAt: verificationCodeExpires,
+      },
+      update: {
+        code: hashed,
+        expiresAt: verificationCodeExpires,
+        verified: false,
+        verifiedAt: null,
       },
     });
 
     // Send verification email
     const emailSent = await sendVerificationEmail(
-      user.email,
-      user.firstName,
+      email,
+      firstName || "",
       verificationCode
     );
 
@@ -891,9 +862,10 @@ export const forgotPassword = async (
       });
     }
 
-    // Generate reset code
+    // Generate reset code (10 minutes) and store hashed
     const resetCode = generateResetCode();
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const resetHashed = hashCode(resetCode);
 
     // Delete any existing reset codes for this email
     await prisma.passwordReset.deleteMany({
@@ -904,7 +876,7 @@ export const forgotPassword = async (
     await prisma.passwordReset.create({
       data: {
         email,
-        resetCode,
+        resetCode: resetHashed,
         expiresAt,
       },
     });
@@ -960,7 +932,7 @@ export const resetPassword = async (
     const passwordReset = await prisma.passwordReset.findFirst({
       where: {
         email,
-        resetCode,
+        resetCode: hashCode(resetCode),
         used: false,
         expiresAt: {
           gt: new Date(),

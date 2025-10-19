@@ -93,6 +93,7 @@ router.post(
           image,
           sortOrder: sortOrder || 0,
           menuId: menu.id,
+          restaurantId,
         },
         include: {
           _count: {
@@ -311,16 +312,17 @@ router.delete(
         });
       }
 
-      if (category._count.items > 0) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Cannot delete category that contains items. Please delete all items first.",
+      // Delete category and all its items using transaction
+      await prisma.$transaction(async (tx) => {
+        // First, delete all items in this category
+        await tx.menuItem.deleteMany({
+          where: { categoryId: id },
         });
-      }
 
-      await prisma.category.delete({
-        where: { id },
+        // Then delete the category
+        await tx.category.delete({
+          where: { id },
+        });
       });
 
       res.json({
@@ -329,6 +331,72 @@ router.delete(
       });
     } catch (error) {
       console.error("Delete category error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Reset all menu (delete all categories and items)
+router.delete(
+  "/reset/all",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+
+      // Get the restaurant's menu
+      const menu = await prisma.menu.findFirst({
+        where: { restaurantId },
+      });
+
+      if (!menu) {
+        return res.status(404).json({
+          success: false,
+          message: "Menu not found",
+        });
+      }
+
+      // Delete all categories and items using transaction
+      await prisma.$transaction(async (tx) => {
+        // Get all category IDs for this menu
+        const categoryIds = await tx.category.findMany({
+          where: { menuId: menu.id },
+          select: { id: true },
+        });
+
+        const categoryIdList = categoryIds.map((c) => c.id);
+
+        // First, delete all menu items in these categories
+        if (categoryIdList.length > 0) {
+          await tx.menuItem.deleteMany({
+            where: {
+              categoryId: {
+                in: categoryIdList,
+              },
+            },
+          });
+        }
+
+        // Then delete all categories
+        await tx.category.deleteMany({
+          where: { menuId: menu.id },
+        });
+      });
+
+      res.json({
+        success: true,
+        message: "All categories and items deleted successfully",
+        data: {
+          message:
+            "Menu has been reset. You can now start adding new categories and items.",
+        },
+      });
+    } catch (error) {
+      console.error("Reset menu error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

@@ -182,14 +182,15 @@ export async function checkExpiringSubscriptions(io?: any) {
   try {
     console.log("📅 Checking expiring subscriptions...");
 
-    const threeDaysFromNow = new Date();
-    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+    // One-day reminder window
+    const oneDayFromNow = new Date();
+    oneDayFromNow.setDate(oneDayFromNow.getDate() + 1);
 
     const expiringSubscriptions = await prisma.subscription.findMany({
       where: {
         status: "ACTIVE",
         endDate: {
-          lte: threeDaysFromNow,
+          lte: oneDayFromNow,
           gte: new Date(), // Not expired yet
         },
       },
@@ -202,40 +203,35 @@ export async function checkExpiringSubscriptions(io?: any) {
     let notificationsSent = 0;
 
     for (const subscription of expiringSubscriptions) {
-      const daysLeft = Math.ceil(
-        (new Date(subscription.endDate!).getTime() - new Date().getTime()) /
-          (1000 * 60 * 60 * 24)
-      );
+      const msLeft =
+        new Date(subscription.endDate!).getTime() - new Date().getTime();
+      const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
 
       // Check if we already sent a notification for this subscription today
       const existingNotification = await prisma.notification.findFirst({
         where: {
           restaurantId: subscription.restaurantId,
-          title: "تذكير: اشتراكك سينتهي قريباً",
+          title: "تذكير: اشتراكك سينتهي غداً",
           createdAt: {
             gte: new Date(new Date().setHours(0, 0, 0, 0)), // Today
           },
         },
       });
 
-      if (!existingNotification) {
+      if (!existingNotification && daysLeft <= 1) {
         // Send notification to restaurant owner
         await createNotification(
           subscription.restaurantId,
-          "تذكير: اشتراكك سينتهي قريباً",
-          `اشتراكك في الخطة ${subscription.plan.name} سينتهي خلال ${daysLeft} ${
-            daysLeft === 1 ? "يوم" : "أيام"
-          }. يرجى تجديد اشتراكك لتجنب انقطاع الخدمة.`,
+          "تذكير: اشتراكك سينتهي غداً",
+          `اشتراكك في الخطة ${subscription.plan.name} سينتهي غداً. يرجى تجديد اشتراكك للحفاظ على الخدمة دون انقطاع.`,
           "GENERAL",
           io
         );
 
         // Send notification to admin
         await createAdminNotification(
-          "اشتراك سينتهي قريباً",
-          `اشتراك المطعم ${subscription.restaurant.name} في الخطة ${
-            subscription.plan.name
-          } سينتهي خلال ${daysLeft} ${daysLeft === 1 ? "يوم" : "أيام"}`,
+          "اشتراك ينتهي غداً",
+          `اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name} ينتهي غداً`,
           "SUBSCRIPTION_EXPIRING",
           subscription.restaurantId,
           io

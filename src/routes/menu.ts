@@ -186,6 +186,7 @@ router.post(
           sortOrder: sortOrder || 0,
           extras: extras ? JSON.parse(extras) : null,
           categoryId,
+          restaurantId,
           discount: discount || 0,
         },
       });

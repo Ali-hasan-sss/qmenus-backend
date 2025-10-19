@@ -1,5 +1,6 @@
 import express, { Response } from "express";
 import { prisma } from "../lib/prisma";
+import { DEFAULT_THEME } from "../constants/defaultTheme";
 
 const router = express.Router();
 
@@ -115,52 +116,6 @@ router.get("/menu/:restaurantId", async (req, res): Promise<any> => {
       },
     });
 
-    // If no theme exists, return default theme
-    const defaultTheme = {
-      id: "cmgahgiu5000f11967hiornqb",
-      layoutType: "grid",
-      showPrices: true,
-      showImages: true,
-      showDescriptions: true,
-      primaryColor: "#f58114",
-      secondaryColor: "#2797dd",
-      backgroundColor: "#ffe59e",
-      textColor: "#000000",
-      accentColor: "#e2ee44",
-
-      // Color Opacity Settings
-      primaryColorOpacity: 0.5,
-      secondaryColorOpacity: 1,
-      backgroundColorOpacity: 0.7,
-      textColorOpacity: 1,
-      accentColorOpacity: 1,
-
-      fontFamily: "Inter",
-      headingSize: "text-2xl",
-      bodySize: "text-base",
-      priceSize: "text-lg",
-      cardPadding: "p-4",
-      cardMargin: "m-2",
-      borderRadius: "rounded-lg",
-      categoryStyle: "tabs",
-      showCategoryImages: false,
-      itemLayout: "vertical",
-      imageAspect: "square",
-      backgroundImage:
-        "https://res.cloudinary.com/dnojeu5cs/image/upload/v1759501200/mymenus-images/uvimvqchjpshc45ighmx.jpg",
-      backgroundOverlay: null,
-      backgroundPosition: "center",
-      backgroundSize: "cover",
-      backgroundRepeat: "no-repeat",
-
-      // Background Overlay Opacity
-      backgroundOverlayOpacity: 0.1,
-      customBackgroundImage:
-        "https://res.cloudinary.com/dnojeu5cs/image/upload/v1759501200/mymenus-images/uvimvqchjpshc45ighmx.jpg",
-
-      customCSS: null,
-    };
-
     res.json({
       success: true,
       data: {
@@ -175,7 +130,7 @@ router.get("/menu/:restaurantId", async (req, res): Promise<any> => {
         },
         tableNumber: tableNumber || null,
         menus,
-        menuTheme: defaultTheme,
+        menuTheme: menuTheme || DEFAULT_THEME,
       },
     });
   } catch (error) {
@@ -257,52 +212,6 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
       },
     });
 
-    // If no theme exists, return default theme
-    const defaultTheme = {
-      id: "cmgahgiu5000f11967hiornqb",
-      layoutType: "grid",
-      showPrices: true,
-      showImages: true,
-      showDescriptions: true,
-      primaryColor: "#f58114",
-      secondaryColor: "#2797dd",
-      backgroundColor: "#ffe59e",
-      textColor: "#000000",
-      accentColor: "#e2ee44",
-
-      // Color Opacity Settings
-      primaryColorOpacity: 0.5,
-      secondaryColorOpacity: 1,
-      backgroundColorOpacity: 0.7,
-      textColorOpacity: 1,
-      accentColorOpacity: 1,
-
-      fontFamily: "Inter",
-      headingSize: "text-2xl",
-      bodySize: "text-base",
-      priceSize: "text-lg",
-      cardPadding: "p-4",
-      cardMargin: "m-2",
-      borderRadius: "rounded-lg",
-      categoryStyle: "tabs",
-      showCategoryImages: false,
-      itemLayout: "vertical",
-      imageAspect: "square",
-      backgroundImage:
-        "https://res.cloudinary.com/dnojeu5cs/image/upload/v1759501200/mymenus-images/uvimvqchjpshc45ighmx.jpg",
-      backgroundOverlay: null,
-      backgroundPosition: "center",
-      backgroundSize: "cover",
-      backgroundRepeat: "no-repeat",
-
-      // Background Overlay Opacity
-      backgroundOverlayOpacity: 0.1,
-      customBackgroundImage:
-        "https://res.cloudinary.com/dnojeu5cs/image/upload/v1759501200/mymenus-images/uvimvqchjpshc45ighmx.jpg",
-
-      customCSS: null,
-    };
-
     res.json({
       success: true,
       data: {
@@ -315,11 +224,133 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
           logo: restaurant.logo,
         },
         categories,
-        menuTheme: defaultTheme,
+        menuTheme: menuTheme || DEFAULT_THEME,
       },
     });
   } catch (error) {
     console.error("Get menu categories error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Search menu items (public - no authentication required)
+// IMPORTANT: This must come BEFORE /menu/:restaurantId/:tableNumber to avoid conflicts
+router.get("/menu/:restaurantId/search", async (req, res): Promise<any> => {
+  try {
+    const { restaurantId } = req.params;
+    const { q } = req.query; // Search query
+
+    if (!q || typeof q !== "string" || q.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Search query is required",
+      });
+    }
+
+    const searchTerm = q.trim().toLowerCase();
+
+    // Verify restaurant exists and is active
+    const restaurant = await prisma.restaurant.findFirst({
+      where: {
+        id: restaurantId,
+        isActive: true,
+      },
+      include: {
+        subscriptions: {
+          where: {
+            status: "ACTIVE",
+          },
+        },
+      },
+    });
+
+    if (!restaurant) {
+      return res.status(404).json({
+        success: false,
+        message: "Restaurant not found",
+      });
+    }
+
+    if (!restaurant.subscriptions?.length) {
+      return res.status(403).json({
+        success: false,
+        message: "Restaurant subscription not active",
+      });
+    }
+
+    // Search in menu items
+    const menuItems = await prisma.menuItem.findMany({
+      where: {
+        restaurantId,
+        isAvailable: true,
+        category: {
+          isActive: true,
+          menu: {
+            isActive: true,
+          },
+        },
+        OR: [
+          {
+            name: {
+              contains: searchTerm,
+              mode: "insensitive",
+            },
+          },
+          {
+            nameAr: {
+              contains: searchTerm,
+              mode: "insensitive",
+            },
+          },
+          {
+            description: {
+              contains: searchTerm,
+              mode: "insensitive",
+            },
+          },
+          {
+            descriptionAr: {
+              contains: searchTerm,
+              mode: "insensitive",
+            },
+          },
+        ],
+      },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            nameAr: true,
+            menu: {
+              select: {
+                id: true,
+                name: true,
+                nameAr: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        name: "asc",
+      },
+      take: 50, // Limit results to 50 items
+    });
+
+    res.json({
+      success: true,
+      data: {
+        items: menuItems,
+        count: menuItems.length,
+        searchTerm: q,
+      },
+    });
+  } catch (error) {
+    console.error("Menu search error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",

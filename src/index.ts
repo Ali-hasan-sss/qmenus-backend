@@ -19,6 +19,8 @@ import orderRoutes from "./routes/order";
 import qrRoutes from "./routes/qr";
 import adminRoutes from "./routes/admin";
 import notificationsRoutes from "./routes/notifications";
+import excelImportRoutes from "./routes/excelImport";
+import galleryRoutes from "./routes/gallery";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -46,10 +48,23 @@ app.set("trust proxy", 1);
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    methods: ["GET", "POST"],
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3000",
+      "http://192.168.1.6:3000",
+    ],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+    ],
+    exposedHeaders: ["Set-Cookie"],
   },
+  allowEIO3: true,
 });
 
 // Security middleware
@@ -57,11 +72,16 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://192.168.1.6:3000",
+    ],
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-    exposedHeaders: ["Set-Cookie"],
+    exposedHeaders: ["Set-Cookie", "Content-Disposition"],
   })
 );
 
@@ -143,10 +163,77 @@ app.use("/api/order", orderRoutes);
 app.use("/api/qr", qrRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/gallery", galleryRoutes);
+
+// Excel import routes with additional CORS headers for file download
+app.use(
+  "/api/excel-import",
+  (req, res, next): void => {
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3000",
+      "http://192.168.1.6:3000",
+    ];
+
+    if (allowedOrigins.includes(origin || "")) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header(
+        "Access-Control-Allow-Methods",
+        "GET, POST, PUT, DELETE, OPTIONS"
+      );
+      res.header(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+      );
+      res.header("Access-Control-Allow-Credentials", "true");
+      res.header(
+        "Access-Control-Expose-Headers",
+        "Content-Disposition, Content-Type"
+      );
+    }
+
+    if (req.method === "OPTIONS") {
+      res.status(200).end();
+      return;
+    }
+
+    next();
+  },
+  excelImportRoutes
+);
 
 // Public menu route (no authentication required)
 import publicRoutes from "./routes/public";
 app.use("/api/public", publicRoutes);
+
+// Handle Socket.IO CORS requests
+app.use("/socket.io", (req, res, next) => {
+  const origin = req.headers.origin;
+  const allowedOrigins = [
+    process.env.FRONTEND_URL || "http://localhost:3000",
+    "http://localhost:3000",
+    "http://192.168.1.6:3000",
+  ];
+
+  if (allowedOrigins.includes(origin || "")) {
+    res.header("Access-Control-Allow-Origin", origin);
+  }
+
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With, Accept, Origin"
+  );
+  res.header("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
+
+  next();
+});
 
 // Setup Socket.IO handlers
 setupSocketHandlers(io);

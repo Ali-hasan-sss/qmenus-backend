@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import dotenv from "dotenv";
+import { createHash } from "crypto";
 
 dotenv.config();
 // Initialize Resend
@@ -21,6 +22,10 @@ export function generateVerificationCode(): string {
 // Generate password reset code
 export function generateResetCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+export function hashCode(code: string): string {
+  return createHash("sha256").update(code).digest("hex");
 }
 
 // Send verification email using Resend

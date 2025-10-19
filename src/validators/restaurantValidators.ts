@@ -35,6 +35,9 @@ export const updateRestaurantSchema = Joi.object({
   website: Joi.string().uri().optional().messages({
     "string.uri": "Please provide a valid website URL",
   }),
+  kitchenWhatsApp: Joi.string().allow("").optional().messages({
+    "string.base": "Kitchen WhatsApp must be a valid string",
+  }),
 });
 
 export const createQRCodeSchema = Joi.object({

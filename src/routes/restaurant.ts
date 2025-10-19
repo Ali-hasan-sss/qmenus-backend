@@ -75,6 +75,7 @@ router.put(
         phone,
         email,
         website,
+        kitchenWhatsApp,
       } = req.body;
 
       const updatedRestaurant = await prisma.restaurant.update({
@@ -88,6 +89,7 @@ router.put(
           phone,
           email,
           website,
+          kitchenWhatsApp,
         },
       });
 

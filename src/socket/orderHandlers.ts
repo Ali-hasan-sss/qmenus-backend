@@ -516,6 +516,72 @@ export const setupSocketHandlers = (io: Server) => {
       }
     });
 
+    // Handle waiter request from customer
+    socket.on(
+      "request_waiter",
+      async (data: {
+        restaurantId: string;
+        tableNumber?: string;
+        orderType: "DINE_IN" | "DELIVERY";
+      }) => {
+        try {
+          const { restaurantId, tableNumber, orderType } = data;
+
+          // Verify restaurant exists
+          const restaurant = await prisma.restaurant.findUnique({
+            where: { id: restaurantId },
+          });
+
+          if (!restaurant) {
+            socket.emit("error", { message: "Restaurant not found" });
+            return;
+          }
+
+          // Create notification for restaurant
+          const notification = await prisma.notification.create({
+            data: {
+              restaurantId,
+              type: "WAITER_REQUEST",
+              title:
+                orderType === "DINE_IN"
+                  ? `طلب نادل من الطاولة ${tableNumber}`
+                  : "طلب نادل من طلب التوصيل",
+              body:
+                orderType === "DINE_IN"
+                  ? `الزبون في الطاولة ${tableNumber} يطلب النادل`
+                  : "زبون التوصيل يطلب النادل",
+              isRead: false,
+            },
+          });
+
+          // Emit waiter request to restaurant room
+          io.to(`restaurant_${restaurantId}`).emit("waiter_request", {
+            notification,
+            tableNumber,
+            orderType,
+            message:
+              orderType === "DINE_IN"
+                ? `Waiter requested from table ${tableNumber}`
+                : "Waiter requested from delivery order",
+          });
+
+          // Confirm to customer
+          socket.emit("waiter_request_sent", {
+            message: "Waiter request sent successfully",
+          });
+
+          console.log(
+            `Waiter request from ${orderType} ${
+              tableNumber || "delivery"
+            } to restaurant ${restaurantId}`
+          );
+        } catch (error) {
+          console.error("Waiter request error:", error);
+          socket.emit("error", { message: "Failed to send waiter request" });
+        }
+      }
+    );
+
     // Handle disconnection
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);

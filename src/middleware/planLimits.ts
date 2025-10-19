@@ -236,7 +236,7 @@ export const checkCategoryLimits = async (
   }
 };
 
-// Middleware to check item limits within a category
+// Middleware to check item limits (total quota system)
 export const checkItemLimits = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -273,19 +273,23 @@ export const checkItemLimits = async (
       });
     }
 
-    // Count current items in the category
-    const currentItems = await prisma.menuItem.count({
+    // Calculate total quota: maxCategories × maxItems
+    const totalQuota = planLimits.maxCategories * planLimits.maxItems;
+
+    // Count total items across all categories for this restaurant
+    const totalItems = await prisma.menuItem.count({
       where: {
-        categoryId: categoryId,
+        restaurantId: restaurantId,
       },
     });
 
-    if (currentItems >= planLimits.maxItems) {
+    if (totalItems >= totalQuota) {
       return res.status(403).json({
-        message: `You have reached the maximum number of items (${planLimits.maxItems}) for this category. Please upgrade your plan to add more items.`,
-        limit: planLimits.maxItems,
-        current: currentItems,
-        categoryId: categoryId,
+        message: `You have reached the maximum total items limit (${totalQuota}) for your plan. Please upgrade your plan to add more items.`,
+        totalQuota: totalQuota,
+        currentTotal: totalItems,
+        planCategories: planLimits.maxCategories,
+        planItemsPerCategory: planLimits.maxItems,
       });
     }
 
@@ -364,6 +368,35 @@ export const checkActiveSubscription = async (
   }
 };
 
+// Middleware to check bulk import limits (Excel import)
+export const checkBulkImportLimits = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<any> => {
+  try {
+    const restaurantId = req.user!.restaurantId!;
+    if (!restaurantId) {
+      return res.status(404).json({ message: "Restaurant not found" });
+    }
+
+    const planLimits = await getPlanLimits(restaurantId);
+    if (!planLimits) {
+      return res.status(403).json({
+        message: "No active subscription found",
+      });
+    }
+
+    // Store plan limits in request for later use
+    (req as any).planLimits = planLimits;
+
+    next();
+  } catch (error) {
+    console.error("Bulk import limits check error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // Combined middleware for plan limits validation
 export const validatePlanLimits = {
   checkTableLimits,
@@ -373,4 +406,5 @@ export const validatePlanLimits = {
   checkItemLimits,
   checkThemePermission,
   checkActiveSubscription,
+  checkBulkImportLimits,
 };

@@ -2,12 +2,12 @@ services:
   - type: web
     name: qmenus-api
     env: node
-    rootDirectory: backend/api-service
+    rootDirectory: api-service
     plan: free
     buildCommand: |
       npm ci
-      npx prisma generate --schema ../../prisma/schema.prisma
-      npx prisma migrate deploy --schema ../../prisma/schema.prisma
+      npx prisma generate --schema ../prisma/schema.prisma
+      npx prisma migrate deploy --schema ../prisma/schema.prisma
       npm run build
     startCommand: node dist/app.js
     healthCheckPath: /health
@@ -33,11 +33,11 @@ services:
   - type: web
     name: qmenus-socket
     env: node
-    rootDirectory: backend/socket-service
+    rootDirectory: socket-service
     plan: free
     buildCommand: |
       npm ci
-      npx prisma generate --schema ../../prisma/schema.prisma
+      npx prisma generate --schema ../prisma/schema.prisma
       npm run build
     startCommand: node dist/socketServer.js
     healthCheckPath: /health
@@ -53,11 +53,11 @@ services:
   - type: web
     name: qmenus-jobs
     env: node
-    rootDirectory: backend/jobs-service
+    rootDirectory: jobs-service
     plan: free
     buildCommand: |
       npm ci
-      npx prisma generate --schema ../../prisma/schema.prisma
+      npx prisma generate --schema ../prisma/schema.prisma
       npm run build
     startCommand: node dist/index.js
     healthCheckPath: /health

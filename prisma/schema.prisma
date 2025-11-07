@@ -39,22 +39,22 @@ model Restaurant {
   phone           String?
   email           String?
   website         String?
-  kitchenWhatsApp String?          // WhatsApp number or group link for kitchen
   isActive        Boolean          @default(true)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   ownerId         String
-  categories    Category[]
-  invoices      Invoice[]
-  menu_items    MenuItem[]
-  menuTheme     MenuTheme?
-  menus         Menu[]
-  notifications Notification[]
-  orders        Order[]
-  qrCodes       QRCode[]
-  theme         RestaurantTheme?
-  owner         User             @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  subscriptions Subscription[]
+  kitchenWhatsApp String?
+  categories      Category[]
+  invoices        Invoice[]
+  menu_items      MenuItem[]
+  menuTheme       MenuTheme?
+  menus           Menu[]
+  notifications   Notification[]
+  orders          Order[]
+  qrCodes         QRCode[]
+  theme           RestaurantTheme?
+  owner           User             @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  subscriptions   Subscription[]
 
   @@map("restaurants")
 }
@@ -249,23 +249,23 @@ model RestaurantTheme {
 
 model Gallery {
   id          String   @id @default(cuid())
-  name        String   // English name for search
-  nameAr      String   // Arabic name for search
-  description String?  // Optional description
-  imageUrl    String   // URL of the image
-  category    String   @default("general") // Category: food, drink, dessert, etc.
-  tags        String?  // Comma-separated tags for better search
+  name        String
+  nameAr      String
+  description String?
+  imageUrl    String
+  category    String   @default("general")
+  tags        String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  uploadedBy  String?  // Admin user ID who uploaded
-  usageCount  Int      @default(0) // Track how many times image is used
+  uploadedBy  String?
+  usageCount  Int      @default(0)
 
-  @@map("gallery")
   @@index([name])
   @@index([nameAr])
   @@index([category])
   @@index([isActive])
+  @@map("gallery")
 }
 
 model MenuTheme {
@@ -387,13 +387,13 @@ model PasswordReset {
 }
 
 model EmailVerification {
-  email      String   @id
+  email      String    @id
   code       String
   expiresAt  DateTime
-  verified   Boolean  @default(false)
+  verified   Boolean   @default(false)
   verifiedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@map("email_verifications")
 }

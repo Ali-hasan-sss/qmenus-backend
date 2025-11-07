@@ -1,17 +1,69 @@
-# Render configuration for backend
 services:
   - type: web
-    name: mymenus-backend
+    name: qmenus-api
     env: node
-    plan: starter
-    buildCommand: npm install && npm run build
-    startCommand: npm run start:prod
+    rootDirectory: backend/api-service
+    plan: free
+    buildCommand: |
+      npm ci
+      npx prisma generate --schema ../../prisma/schema.prisma
+      npx prisma migrate deploy --schema ../../prisma/schema.prisma
+      npm run build
+    startCommand: node dist/app.js
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: SOCKET_SERVICE_URL
+        sync: false
 
-databases:
-  - name: mymenus-db
-    plan: starter
-    databaseName: mymenus
-    user: mymenus_user
+  - type: web
+    name: qmenus-socket
+    env: node
+    rootDirectory: backend/socket-service
+    plan: free
+    buildCommand: |
+      npm ci
+      npx prisma generate --schema ../../prisma/schema.prisma
+      npm run build
+    startCommand: node dist/socketServer.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+
+  - type: web
+    name: qmenus-jobs
+    env: node
+    rootDirectory: backend/jobs-service
+    plan: free
+    buildCommand: |
+      npm ci
+      npx prisma generate --schema ../../prisma/schema.prisma
+      npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false

@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import multer from "multer";
+import multer, { FileFilterCallback } from "multer";
 import * as XLSX from "xlsx";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validatePlanLimits } from "../middleware/planLimits";
@@ -14,7 +14,11 @@ const upload = multer({
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (
+    req: Request,
+    file: Express.Multer.File,
+    cb: FileFilterCallback
+  ) => {
     const allowedTypes = [
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
       "application/vnd.ms-excel", // .xls

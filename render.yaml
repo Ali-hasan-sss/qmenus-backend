@@ -5,7 +5,7 @@ services:
     rootDirectory: api-service
     plan: free
     buildCommand: |
-      npm ci
+      npm ci --include=dev
       npx prisma generate --schema ../prisma/schema.prisma
       npx prisma migrate deploy --schema ../prisma/schema.prisma
       npm run build

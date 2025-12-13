@@ -99,6 +99,10 @@ services:
       # Database Initialization
       # Set to "true" or "1" to run migrations and seeding on first start
       RUN_DB_INIT: ${RUN_DB_INIT:-true}
+      
+      # PostgreSQL Wait (for docker-compose only)
+      # Set to "true" to wait for postgres service, "false" for external databases
+      WAIT_FOR_POSTGRES: ${WAIT_FOR_POSTGRES:-true}
     ports:
       - "${API_PORT:-5000}:5000"
       - "${SOCKET_PORT:-5001}:5001"

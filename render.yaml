@@ -17,6 +17,10 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: WAIT_FOR_POSTGRES
+        value: "false"
+      - key: RUN_DB_INIT
+        value: "true"
       - key: JWT_SECRET
         sync: false
       - key: FRONTEND_URL
@@ -47,6 +51,10 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: WAIT_FOR_POSTGRES
+        value: "false"
+      - key: RUN_DB_INIT
+        value: "true"
       - key: FRONTEND_URL
         sync: false
 

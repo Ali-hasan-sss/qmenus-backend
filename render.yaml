@@ -23,6 +23,8 @@ services:
         value: "7d"
       - key: FRONTEND_URL
         sync: false
+      - key: PORT
+        value: "5000"
       - key: API_PORT
         value: "5000"
       - key: SOCKET_PORT

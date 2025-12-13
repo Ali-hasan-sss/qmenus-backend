@@ -23,7 +23,7 @@ module.exports = {
     },
     {
       name: "socket-service",
-      script: "dist/socketServer.js",
+      script: "dist/socket-service/src/socketServer.js",
       cwd: "./socket-service",
       instances: 1,
       exec_mode: "fork",
@@ -44,7 +44,7 @@ module.exports = {
     },
     {
       name: "jobs-service",
-      script: "dist/index.js",
+      script: "dist/jobs-service/src/index.js",
       cwd: "./jobs-service",
       instances: 1,
       exec_mode: "fork",

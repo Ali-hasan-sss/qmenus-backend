@@ -16,8 +16,14 @@ try {
 // Check if services are built
 const services = [
   { name: "api-service", dist: "./api-service/dist/app.js" },
-  { name: "socket-service", dist: "./socket-service/dist/socketServer.js" },
-  { name: "jobs-service", dist: "./jobs-service/dist/index.js" },
+  {
+    name: "socket-service",
+    dist: "./socket-service/dist/socket-service/src/socketServer.js",
+  },
+  {
+    name: "jobs-service",
+    dist: "./jobs-service/dist/jobs-service/src/index.js",
+  },
 ];
 
 console.log("🔍 Checking if services are built...\n");

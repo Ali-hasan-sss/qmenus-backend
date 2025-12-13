@@ -1,0 +1,37 @@
+version: "3.8"
+
+# Development docker-compose with hot reload
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mymenus-postgres-dev
+    environment:
+      POSTGRES_USER: mymenus_user
+      POSTGRES_PASSWORD: mymenus_password
+      POSTGRES_DB: mymenus
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - mymenus-dev-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: mymenus-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_dev_data:/data
+    networks:
+      - mymenus-dev-network
+    restart: unless-stopped
+
+volumes:
+  postgres_dev_data:
+  redis_dev_data:
+
+networks:
+  mymenus-dev-network:
+    driver: bridge

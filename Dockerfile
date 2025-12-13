@@ -56,12 +56,19 @@ RUN npm ci --only=production && \
 RUN npx prisma generate --schema ./prisma/schema.prisma
 
 # Copy built files from builder
+# Verify files exist and copy them
 COPY --from=builder /app/api-service/dist ./api-service/dist
 COPY --from=builder /app/socket-service/dist ./socket-service/dist
 COPY --from=builder /app/jobs-service/dist ./jobs-service/dist
 
-# Copy shared config
+# Copy shared config (needed at runtime)
 COPY --from=builder /app/shared ./shared
+
+# Verify critical files exist
+RUN test -f ./api-service/dist/app.js || (echo "ERROR: api-service/dist/app.js not found!" && exit 1) && \
+    test -f ./socket-service/dist/socketServer.js || (echo "ERROR: socket-service/dist/socketServer.js not found!" && exit 1) && \
+    test -f ./jobs-service/dist/index.js || (echo "ERROR: jobs-service/dist/index.js not found!" && exit 1) && \
+    echo "✅ All service files verified"
 
 # Copy ecosystem config and scripts
 COPY ecosystem.config.js ./

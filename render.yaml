@@ -1,15 +1,11 @@
 services:
+  # Single Docker service with all backend services
   - type: web
-    name: qmenus-api
-    env: node
-    rootDirectory: api-service
-    plan: free
-    buildCommand: |
-      npm ci --include=dev
-      npx prisma generate --schema ../prisma/schema.prisma
-      npx prisma migrate deploy --schema ../prisma/schema.prisma
-      npm run build
-    startCommand: node dist/app.js
+    name: mymenus-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./backend
+    plan: free # Change to 'free' if available, or upgrade plan
     healthCheckPath: /health
     autoDeploy: true
     envVars:
@@ -23,55 +19,47 @@ services:
         value: "true"
       - key: JWT_SECRET
         sync: false
+      - key: JWT_EXPIRES_IN
+        value: "7d"
       - key: FRONTEND_URL
         sync: false
+      - key: API_PORT
+        value: "5000"
+      - key: SOCKET_PORT
+        value: "5001"
+      - key: JOBS_PORT
+        value: "5002"
+      - key: SOCKET_SERVICE_URL
+        value: "http://localhost:5001"
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
       - key: REDIS_URL
         sync: false
-      - key: SOCKET_SERVICE_URL
-        sync: false
-
-  - type: web
-    name: qmenus-socket
-    env: node
-    rootDirectory: socket-service
-    plan: free
-    buildCommand: |
-      npm ci
-      npx prisma generate --schema ../prisma/schema.prisma
-      npm run build
-    startCommand: node dist/socketServer.js
-    healthCheckPath: /health
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false
-      - key: WAIT_FOR_POSTGRES
-        value: "false"
-      - key: RUN_DB_INIT
-        value: "true"
-      - key: FRONTEND_URL
-        sync: false
-
-  - type: web
-    name: qmenus-jobs
-    env: node
-    rootDirectory: jobs-service
-    plan: free
-    buildCommand: |
-      npm ci
-      npx prisma generate --schema ../prisma/schema.prisma
-      npm run build
-    startCommand: node dist/index.js
-    healthCheckPath: /health
-    autoDeploy: true
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        sync: false
+      - key: MAX_FILE_SIZE
+        value: "5242880"
+      - key: ALLOWED_FILE_TYPES
+        value: "image/jpeg,image/png,image/webp"
+      - key: AUTH_RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: AUTH_RATE_LIMIT_MAX_REQUESTS
+        value: "5"
+      - key: GENERAL_RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: GENERAL_RATE_LIMIT_MAX_REQUESTS
+        value: "200"
+      - key: PUBLIC_RATE_LIMIT_WINDOW_MS
+        value: "900000"
+      - key: PUBLIC_RATE_LIMIT_MAX_REQUESTS
+        value: "1000"
+      - key: ORDER_TRACKING_RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: ORDER_TRACKING_RATE_LIMIT_MAX_REQUESTS
+        value: "30"

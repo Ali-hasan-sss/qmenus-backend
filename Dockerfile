@@ -14,23 +14,26 @@ COPY jobs-service/package*.json ./jobs-service/
 
 # Install root dependencies
 # Using npm install instead of npm ci because package-lock.json may be out of sync
-RUN npm install --include=dev
+# Skip postinstall scripts because Prisma schema is not available yet
+RUN npm install --include=dev --ignore-scripts
 
 # Install shared dependencies
 WORKDIR /app/shared
-RUN npm install --include=dev
+RUN npm install --include=dev --ignore-scripts
 
 # Install api-service dependencies
 WORKDIR /app/api-service
-RUN npm install --include=dev
+RUN npm install --include=dev --ignore-scripts
 
 # Install socket-service dependencies
+# Skip postinstall scripts because Prisma schema is not available yet
 WORKDIR /app/socket-service
-RUN npm install --include=dev
+RUN npm install --include=dev --ignore-scripts
 
 # Install jobs-service dependencies
+# Skip postinstall scripts because Prisma schema is not available yet
 WORKDIR /app/jobs-service
-RUN npm install --include=dev
+RUN npm install --include=dev --ignore-scripts
 
 # Return to root
 WORKDIR /app

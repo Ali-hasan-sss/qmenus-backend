@@ -103,18 +103,19 @@ COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modul
 COPY --from=builder --chown=nodejs:nodejs /app/api-service/scripts ./api-service/scripts
 
 # Install production dependencies only
+# Using npm install instead of npm ci because package-lock.json may be out of sync
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 WORKDIR /app/api-service
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 WORKDIR /app/socket-service
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 WORKDIR /app/jobs-service
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev && npm cache clean --force
 
 # Install PM2 globally for pm2-runtime
 RUN npm install -g pm2

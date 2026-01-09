@@ -25,7 +25,6 @@ if (!envLoaded) {
 }
 const { PrismaClient } = require("@prisma/client");
 const { execSync } = require("child_process");
-const path = require("path");
 
 async function checkAndSeed() {
   let prisma;

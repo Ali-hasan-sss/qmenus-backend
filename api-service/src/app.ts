@@ -20,6 +20,8 @@ import notificationsRoutes from "./routes/notifications";
 import excelImportRoutes from "./routes/excelImport";
 import galleryRoutes from "./routes/gallery";
 import publicRoutes from "./routes/public";
+import sectionRoutes from "./routes/section";
+import kitchenRoutes from "./routes/kitchen";
 
 // Import middleware
 import { errorHandler } from "./middleware/errorHandler";
@@ -72,8 +74,8 @@ const limiter = rateLimit({
   max: 1000, // limit each IP to 1000 requests per windowMs
   message: "Too many requests from this IP, please try again later.",
   skip: (req) => {
-    // Skip rate limiting for health checks and certain routes
-    return req.path === "/health" || req.path.startsWith("/socket.io");
+    // Skip rate limiting for health checks
+    return req.path === "/health";
   },
 });
 app.use(limiter);
@@ -110,6 +112,8 @@ app.use("/api/notifications", notificationsRoutes);
 app.use("/api/excel-import", excelImportRoutes);
 app.use("/api/gallery", galleryRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/section", sectionRoutes);
+app.use("/api/kitchen", kitchenRoutes);
 
 // Error handling middleware
 app.use(notFound);

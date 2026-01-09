@@ -1,5 +1,5 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import {
   authenticate,
   AuthRequest,
@@ -173,10 +173,16 @@ router.get(
       res.json({
         success: true,
         data: {
-          orderStats: orderStats.reduce((acc, stat) => {
-            acc[stat.status] = stat._count.id;
-            return acc;
-          }, {} as Record<string, number>),
+          orderStats: orderStats.reduce(
+            (
+              acc: Record<string, number>,
+              stat: { status: string; _count: { id: number } }
+            ) => {
+              acc[stat.status] = stat._count.id;
+              return acc;
+            },
+            {} as Record<string, number>
+          ),
           revenue: revenue._sum.totalPrice || 0,
           totalOrders,
           activeQRCodes,
@@ -371,7 +377,8 @@ router.get(
           address: true,
           phone: true,
           logo: true,
-        },
+          currency: true,
+        } as any,
       });
 
       if (!restaurant) {
@@ -403,20 +410,34 @@ router.put(
   validateRequest(updateRestaurantSchema),
   async (req: AuthRequest, res: Response): Promise<any> => {
     try {
-      const { name, nameAr, description, descriptionAr, address, phone, logo } =
-        req.body;
+      const {
+        name,
+        nameAr,
+        description,
+        descriptionAr,
+        address,
+        phone,
+        logo,
+        currency,
+      } = req.body;
+
+      const updateData: any = {
+        name: name || null,
+        nameAr: nameAr || null,
+        description: description || null,
+        descriptionAr: descriptionAr || null,
+        address: address || null,
+        phone: phone || null,
+        logo: logo || null,
+      };
+
+      if (currency !== undefined) {
+        updateData.currency = currency;
+      }
 
       const updatedRestaurant = await prisma.restaurant.update({
         where: { id: req.user!.restaurantId },
-        data: {
-          name: name || null,
-          nameAr: nameAr || null,
-          description: description || null,
-          descriptionAr: descriptionAr || null,
-          address: address || null,
-          phone: phone || null,
-          logo: logo || null,
-        },
+        data: updateData,
         select: {
           id: true,
           name: true,
@@ -426,7 +447,8 @@ router.put(
           address: true,
           phone: true,
           logo: true,
-        },
+          currency: true,
+        } as any,
       });
 
       res.json({
@@ -435,6 +457,114 @@ router.put(
       });
     } catch (error) {
       console.error("Update restaurant profile error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Get restaurant settings (taxes)
+router.get(
+  "/settings",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId;
+
+      let settings = await prisma.restaurantSettings.findUnique({
+        where: { restaurantId },
+      });
+
+      // Create default settings if they don't exist
+      if (!settings) {
+        settings = await prisma.restaurantSettings.create({
+          data: {
+            restaurantId: restaurantId!,
+            taxes: [],
+          },
+        });
+      }
+
+      res.json({
+        success: true,
+        data: settings,
+      });
+    } catch (error) {
+      console.error("Get restaurant settings error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Update restaurant settings (taxes)
+router.put(
+  "/settings",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const { taxes } = req.body;
+      const restaurantId = req.user!.restaurantId;
+
+      // Validate taxes array
+      if (taxes && !Array.isArray(taxes)) {
+        return res.status(400).json({
+          success: false,
+          message: "Taxes must be an array",
+        });
+      }
+
+      // Validate maximum 3 taxes
+      if (taxes && taxes.length > 3) {
+        return res.status(400).json({
+          success: false,
+          message: "Maximum 3 taxes allowed",
+        });
+      }
+
+      // Validate each tax
+      if (taxes) {
+        for (const tax of taxes) {
+          if (!tax.name || tax.percentage === undefined) {
+            return res.status(400).json({
+              success: false,
+              message: "Each tax must have a name and percentage",
+            });
+          }
+          if (tax.percentage < 0 || tax.percentage > 100) {
+            return res.status(400).json({
+              success: false,
+              message: "Tax percentage must be between 0 and 100",
+            });
+          }
+        }
+      }
+
+      // Upsert settings
+      const settings = await prisma.restaurantSettings.upsert({
+        where: { restaurantId: restaurantId! },
+        update: {
+          taxes: taxes || [],
+        },
+        create: {
+          restaurantId: restaurantId!,
+          taxes: taxes || [],
+        },
+      });
+
+      res.json({
+        success: true,
+        data: settings,
+        message: "Settings updated successfully",
+      });
+    } catch (error) {
+      console.error("Update restaurant settings error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

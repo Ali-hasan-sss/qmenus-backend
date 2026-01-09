@@ -96,10 +96,6 @@ export const createMenuItemSchema = Joi.object({
     "number.positive": "Price must be positive",
     "any.required": "Price is required",
   }),
-  currency: Joi.string().length(3).uppercase().optional().messages({
-    "string.length": "Currency must be 3 characters long",
-    "string.uppercase": "Currency must be uppercase",
-  }),
   image: Joi.string().uri().allow("").optional().messages({
     "string.uri": "Image must be a valid URL",
   }),
@@ -119,6 +115,9 @@ export const createMenuItemSchema = Joi.object({
   }),
   categoryId: Joi.string().required().messages({
     "any.required": "Category ID is required",
+  }),
+  kitchenSectionId: Joi.string().allow(null, "").optional().messages({
+    "string.base": "Kitchen section ID must be a string",
   }),
 });
 
@@ -143,10 +142,6 @@ export const updateMenuItemSchema = Joi.object({
     "number.positive": "Price must be positive",
     "any.required": "Price is required",
   }),
-  currency: Joi.string().length(3).uppercase().optional().messages({
-    "string.length": "Currency must be 3 characters long",
-    "string.uppercase": "Currency must be uppercase",
-  }),
   image: Joi.string().uri().allow("").optional().messages({
     "string.uri": "Image must be a valid URL",
   }),
@@ -166,6 +161,9 @@ export const updateMenuItemSchema = Joi.object({
   }),
   categoryId: Joi.string().required().messages({
     "any.required": "Category ID is required",
+  }),
+  kitchenSectionId: Joi.string().allow(null, "").optional().messages({
+    "string.base": "Kitchen section ID must be a string",
   }),
 });
 

@@ -1,5 +1,5 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import { DEFAULT_THEME } from "../constants/defaultTheme";
 
 const router = express.Router();
@@ -222,9 +222,11 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
           description: restaurant.description,
           descriptionAr: restaurant.descriptionAr,
           logo: restaurant.logo,
+          currency: (restaurant as any).currency || "USD",
         },
         categories,
         menuTheme: menuTheme || DEFAULT_THEME,
+        currency: (restaurant as any).currency || "USD",
       },
     });
   } catch (error) {
@@ -347,6 +349,7 @@ router.get("/menu/:restaurantId/search", async (req, res): Promise<any> => {
         items: menuItems,
         count: menuItems.length,
         searchTerm: q,
+        currency: (restaurant as any).currency || "USD",
       },
     });
   } catch (error) {
@@ -531,13 +534,23 @@ router.get(
           id: restaurantId,
           isActive: true,
         },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          description: true,
+          descriptionAr: true,
+          logo: true,
+          currency: true,
           subscriptions: {
             where: {
               status: "ACTIVE",
             },
+            select: {
+              id: true,
+            },
           },
-        },
+        } as any,
       });
 
       if (!restaurant) {
@@ -589,7 +602,6 @@ router.get(
           description: true,
           descriptionAr: true,
           price: true,
-          currency: true,
           image: true,
           extras: true,
           sortOrder: true,
@@ -598,11 +610,15 @@ router.get(
         },
       });
 
+      // Get currency from restaurant (ensure it's included)
+      const currency = (restaurant as any).currency || "USD";
+
       res.json({
         success: true,
         data: {
           category,
           items,
+          currency,
         },
       });
     } catch (error) {

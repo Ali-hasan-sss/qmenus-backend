@@ -2,20 +2,24 @@
   "name": "jobs-service",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/index.js",
+  "main": "dist/jobs-service/src/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc -p .",
-    "start": "node dist/index.js"
+    "build": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma && tsc -p .",
+    "postinstall": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma",
+    "start": "node dist/jobs-service/src/index.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
     "dotenv": "^16.4.5",
-    "node-cron": "^3.0.3",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
-    "typescript": "^5.6.3",
-    "ts-node-dev": "^2.0.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^20.10.0",
+    "@types/node-cron": "^3.0.11",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
   }
 }

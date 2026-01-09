@@ -1,6 +1,6 @@
 import express, { Response } from "express";
 import QRCode from "qrcode";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import {
   authenticate,
   AuthRequest,
@@ -11,6 +11,31 @@ import { createQRCodeSchema } from "../validators/restaurantValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
 
 const router = express.Router();
+
+// Helper function to ensure isOccupied column exists
+const ensureIsOccupiedColumn = async () => {
+  try {
+    // Check if column exists by trying to query it
+    await prisma.$executeRaw`
+      SELECT "isOccupied" FROM qr_codes LIMIT 1
+    `;
+  } catch (error: any) {
+    // Column doesn't exist, create it
+    if (error.code === "42703" || error.message?.includes("does not exist")) {
+      try {
+        await prisma.$executeRaw`
+          ALTER TABLE qr_codes ADD COLUMN IF NOT EXISTS "isOccupied" BOOLEAN NOT NULL DEFAULT false
+        `;
+        console.log("✅ Added isOccupied column to qr_codes table");
+      } catch (migrationError) {
+        console.error("Error adding isOccupied column:", migrationError);
+      }
+    }
+  }
+};
+
+// Ensure column exists on startup
+ensureIsOccupiedColumn().catch(console.error);
 
 // Create or fetch a static restaurant-level QR code (no table number in URL)
 router.post(
@@ -25,12 +50,22 @@ router.post(
       const RESTAURANT_SENTINEL = "ROOT";
 
       // Check if restaurant-level QR already exists
-      let qrCode = await prisma.qRCode.findFirst({
+      // Use select to avoid isOccupied field until migration is applied
+      let qrCode = (await prisma.qRCode.findFirst({
         where: {
           restaurantId,
           tableNumber: RESTAURANT_SENTINEL,
         },
-      });
+        select: {
+          id: true,
+          tableNumber: true,
+          qrCode: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          restaurantId: true,
+        },
+      })) as any;
 
       const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
       // Use "DELIVERY" as special tableNumber for restaurant QR (delivery orders)
@@ -265,7 +300,7 @@ router.get(
 
       // Generate QR code images for each QR code
       const qrCodesWithImages = await Promise.all(
-        qrCodes.map(async (qrCode) => {
+        qrCodes.map(async (qrCode: any) => {
           const qrCodeImage = await QRCode.toDataURL(qrCode.qrCode, {
             width: 300,
             margin: 2,
@@ -406,6 +441,331 @@ router.put(
   }
 );
 
+// Toggle table occupied status (for cashier to start/end table session)
+router.put(
+  "/:id/toggle-occupied",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const restaurantId = req.user!.restaurantId!;
+
+      console.log(
+        `📞 [QR Toggle] Request received - QR ID: ${id}, Restaurant: ${restaurantId}`
+      );
+
+      const qrCode = await prisma.qRCode.findFirst({
+        where: {
+          id,
+          restaurantId,
+        },
+      });
+
+      if (!qrCode) {
+        return res.status(404).json({
+          success: false,
+          message: "QR code not found",
+        });
+      }
+
+      console.log(
+        `🔄 [QR Toggle] QR ID: ${id}, Table: ${qrCode.tableNumber}, Restaurant: ${restaurantId}`
+      );
+
+      // Use raw query to read current value and update
+      const currentResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${id}
+      `;
+      const currentOccupied = currentResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `🔄 [QR Toggle] QR ID: ${id}, Table: ${
+          qrCode.tableNumber
+        }, Current isOccupied: ${currentOccupied}, Setting to: ${!currentOccupied}`
+      );
+
+      await prisma.$executeRaw`
+        UPDATE qr_codes 
+        SET "isOccupied" = ${!currentOccupied}
+        WHERE id = ${id}
+      `;
+
+      // Read updated value using raw query
+      const updatedResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${id}
+      `;
+      const updatedOccupied = updatedResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `✅ [QR Toggle] QR ID: ${id}, Table: ${qrCode.tableNumber}, Updated isOccupied: ${updatedOccupied}`
+      );
+
+      const updatedQRCode = await prisma.qRCode.findFirst({
+        where: { id },
+      });
+
+      res.json({
+        success: true,
+        message: `Table ${
+          updatedOccupied ? "occupied" : "vacated"
+        } successfully`,
+        data: {
+          qrCode: {
+            ...updatedQRCode,
+            isOccupied: updatedOccupied,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("❌ [QR Toggle] Error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Check table occupied status by table number (for debugging)
+router.get(
+  "/table/:tableNumber/status",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { tableNumber } = req.params;
+      const restaurantId = req.user!.restaurantId!;
+      const normalizedTableNumber = String(tableNumber).trim();
+
+      console.log(
+        `🔍 [QR Status Check] Restaurant: ${restaurantId}, Table: ${normalizedTableNumber}`
+      );
+
+      const qrCode = await prisma.qRCode.findFirst({
+        where: {
+          restaurantId,
+          tableNumber: normalizedTableNumber,
+          isActive: true,
+        },
+        select: {
+          id: true,
+          tableNumber: true,
+        },
+      });
+
+      if (!qrCode) {
+        return res.status(404).json({
+          success: false,
+          message: "Table not found",
+        });
+      }
+
+      // Use raw query to get accurate value
+      const occupiedResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+      `;
+      const isOccupied = occupiedResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `✅ [QR Status Check] Table: ${normalizedTableNumber}, QR ID: ${qrCode.id}, isOccupied: ${isOccupied}`
+      );
+
+      res.json({
+        success: true,
+        data: {
+          tableNumber: normalizedTableNumber,
+          qrCodeId: qrCode.id,
+          isOccupied,
+        },
+      });
+    } catch (error) {
+      console.error("❌ [QR Status Check] Error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Toggle table occupied status by table number (alternative endpoint)
+router.put(
+  "/table/:tableNumber/toggle-occupied",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { tableNumber } = req.params;
+      const restaurantId = req.user!.restaurantId!;
+      const normalizedTableNumber = String(tableNumber).trim();
+
+      console.log(
+        `📞 [QR Toggle by Table] Request received - Table: ${normalizedTableNumber}, Restaurant: ${restaurantId}`
+      );
+
+      const qrCode = await prisma.qRCode.findFirst({
+        where: {
+          restaurantId,
+          tableNumber: normalizedTableNumber,
+          isActive: true,
+        },
+      });
+
+      if (!qrCode) {
+        return res.status(404).json({
+          success: false,
+          message: "Table not found",
+        });
+      }
+
+      // Use raw query to read current value and update
+      const currentResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+      `;
+      const currentOccupied = currentResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `🔄 [QR Toggle by Table] Table: ${normalizedTableNumber}, QR ID: ${
+          qrCode.id
+        }, Current isOccupied: ${currentOccupied}, Setting to: ${!currentOccupied}`
+      );
+
+      await prisma.$executeRaw`
+        UPDATE qr_codes 
+        SET "isOccupied" = ${!currentOccupied}
+        WHERE id = ${qrCode.id}
+      `;
+
+      // Read updated value using raw query
+      const updatedResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+      `;
+      const updatedOccupied = updatedResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `✅ [QR Toggle by Table] Table: ${normalizedTableNumber}, QR ID: ${qrCode.id}, Updated isOccupied: ${updatedOccupied}`
+      );
+
+      res.json({
+        success: true,
+        message: `Table ${
+          updatedOccupied ? "occupied" : "vacated"
+        } successfully`,
+        data: {
+          qrCode: {
+            ...qrCode,
+            isOccupied: updatedOccupied,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("❌ [QR Toggle by Table] Error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Set table occupied status by table number (alternative endpoint)
+router.put(
+  "/table/:tableNumber/occupied",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { tableNumber } = req.params;
+      const { isOccupied } = req.body;
+      const restaurantId = req.user!.restaurantId!;
+      const normalizedTableNumber = String(tableNumber).trim();
+
+      if (typeof isOccupied !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: "isOccupied must be a boolean value",
+        });
+      }
+
+      console.log(
+        `📞 [QR Set] Request received - Table: ${normalizedTableNumber}, Restaurant: ${restaurantId}, Setting isOccupied to: ${isOccupied}`
+      );
+
+      const qrCode = await prisma.qRCode.findFirst({
+        where: {
+          restaurantId,
+          tableNumber: normalizedTableNumber,
+          isActive: true,
+        },
+      });
+
+      if (!qrCode) {
+        return res.status(404).json({
+          success: false,
+          message: "Table not found",
+        });
+      }
+
+      // Use raw query to update and read the value
+      console.log(
+        `🔄 [QR Set] Table: ${normalizedTableNumber}, QR ID: ${qrCode.id}, Setting isOccupied to: ${isOccupied}`
+      );
+
+      await prisma.$executeRaw`
+        UPDATE qr_codes 
+        SET "isOccupied" = ${isOccupied}
+        WHERE id = ${qrCode.id}
+      `;
+
+      // Read updated value using raw query to ensure accuracy
+      const updatedResult = await prisma.$queryRaw<
+        Array<{ isOccupied: boolean }>
+      >`
+        SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+      `;
+      const updatedOccupied = updatedResult[0]?.isOccupied ?? false;
+
+      console.log(
+        `✅ [QR Set] Table: ${tableNumber}, QR ID: ${qrCode.id}, Updated isOccupied: ${updatedOccupied}`
+      );
+
+      const updatedQRCode = await prisma.qRCode.findFirst({
+        where: { id: qrCode.id },
+      });
+
+      res.json({
+        success: true,
+        message: `Table ${
+          updatedOccupied ? "occupied" : "vacated"
+        } successfully`,
+        data: {
+          qrCode: {
+            ...updatedQRCode,
+            isOccupied: updatedOccupied,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Set table occupied status error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
 // Bulk delete QR codes
 router.delete(
   "/bulk-delete",
@@ -451,10 +811,12 @@ router.delete(
         success: true,
         message: `${qrCodes.length} QR codes deleted successfully`,
         data: {
-          deletedQRCodes: qrCodes.map((qr) => ({
-            id: qr.id,
-            tableNumber: qr.tableNumber,
-          })),
+          deletedQRCodes: qrCodes.map(
+            (qr: { id: string; tableNumber: string }) => ({
+              id: qr.id,
+              tableNumber: qr.tableNumber,
+            })
+          ),
         },
       });
     } catch (error) {
@@ -543,7 +905,9 @@ router.post(
         select: { tableNumber: true },
       });
 
-      const existingTableNumbers = existingQRCodes.map((qr) => qr.tableNumber);
+      const existingTableNumbers = existingQRCodes.map(
+        (qr: { tableNumber: string }) => qr.tableNumber
+      );
       const newTableNumbers = tableNumbers.filter(
         (table: string) => !existingTableNumbers.includes(table)
       );
@@ -615,7 +979,9 @@ router.post(
         select: { tableNumber: true },
       });
 
-      const existingTableNumbers = existingQRCodes.map((qr) => qr.tableNumber);
+      const existingTableNumbers = existingQRCodes.map(
+        (qr: { tableNumber: string }) => qr.tableNumber
+      );
       const newTableNumbers = tableNumbers.filter(
         (table: string) => !existingTableNumbers.includes(table)
       );

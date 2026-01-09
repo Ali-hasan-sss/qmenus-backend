@@ -1,70 +1,59 @@
 #!/bin/bash
 
-# سكريبت نشر المشروع على VPS
-# الاستخدام: ./scripts/deploy.sh
+# Deployment script for QMenus Backend
+# Usage: ./scripts/deploy.sh
 
-set -e  # إيقاف عند حدوث خطأ
+set -e
 
-echo "🚀 بدء عملية النشر..."
+echo "🚀 Starting deployment..."
 
-# الألوان للرسائل
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# التحقق من وجود Node.js
-if ! command -v node &> /dev/null; then
-    echo -e "${RED}❌ Node.js غير مثبت. يرجى تثبيته أولاً.${NC}"
+# Check if .env exists
+if [ ! -f .env ]; then
+    echo "❌ .env file not found. Please copy .env.example to .env and configure it."
     exit 1
 fi
 
-# التحقق من وجود PM2
-if ! command -v pm2 &> /dev/null; then
-    echo -e "${YELLOW}⚠️  PM2 غير مثبت. جاري التثبيت...${NC}"
-    npm install -g pm2
+# Check if SSL certificates exist
+if [ ! -f nginx/ssl/cert.pem ] || [ ! -f nginx/ssl/key.pem ]; then
+    echo "⚠️  SSL certificates not found. Running setup-ssl.sh..."
+    ./scripts/setup-ssl.sh
 fi
 
-# التحقق من وجود ملف .env
-if [ ! -f .env ]; then
-    echo -e "${YELLOW}⚠️  ملف .env غير موجود. جاري نسخه من env.example...${NC}"
-    if [ -f env.example ]; then
-        cp env.example .env
-        echo -e "${YELLOW}⚠️  يرجى تعديل ملف .env قبل المتابعة!${NC}"
-        exit 1
-    else
-        echo -e "${RED}❌ ملف env.example غير موجود!${NC}"
-        exit 1
-    fi
-fi
+# Create necessary directories
+echo "📁 Creating directories..."
+mkdir -p nginx/logs
+mkdir -p api-service/logs
+mkdir -p socket-service/logs
+mkdir -p jobs-service/logs
 
-# الانتقال إلى مجلد المشروع
-cd "$(dirname "$0")/.."
+# Stop existing containers
+echo "🛑 Stopping existing containers..."
+docker-compose down
 
-echo -e "${GREEN}📦 تثبيت التبعيات...${NC}"
-npm install --production
+# Build images
+echo "🔨 Building Docker images..."
+docker-compose build --no-cache
 
-echo -e "${GREEN}🔧 توليد Prisma Client...${NC}"
-npm run db:generate
+# Start services
+echo "▶️  Starting services..."
+docker-compose up -d
 
-echo -e "${GREEN}🗄️  تشغيل Migrations...${NC}"
-npm run db:deploy
+# Wait for services to be ready
+echo "⏳ Waiting for services to be ready..."
+sleep 10
 
-echo -e "${GREEN}🔨 بناء جميع الخدمات...${NC}"
-npm run build:all
+# Check service health
+echo "🏥 Checking service health..."
+docker-compose ps
 
-echo -e "${GREEN}🛑 إيقاف الخدمات السابقة (إن وجدت)...${NC}"
-pm2 delete ecosystem.config.js 2>/dev/null || true
+# Run database migrations
+echo "🗄️  Running database migrations..."
+docker-compose exec -T backend npx prisma@5.22.0 migrate deploy --schema /app/shared/prisma/schema.prisma || true
 
-echo -e "${GREEN}🚀 تشغيل جميع الخدمات...${NC}"
-npm run start:prod
+# Seed database if needed
+echo "🌱 Seeding database..."
+docker-compose exec -T backend node /app/api-service/scripts/check-and-seed.js || true
 
-echo -e "${GREEN}💾 حفظ قائمة PM2...${NC}"
-pm2 save
-
-echo -e "${GREEN}✅ تم النشر بنجاح!${NC}"
-echo ""
-echo "📊 عرض حالة الخدمات: pm2 status"
-echo "📋 عرض السجلات: pm2 logs"
-echo "🔄 إعادة التشغيل: pm2 restart ecosystem.config.js"
-
+echo "✅ Deployment complete!"
+echo "📊 View logs with: docker-compose logs -f"
+echo "🌐 API URL: https://api.qmenussy.com"

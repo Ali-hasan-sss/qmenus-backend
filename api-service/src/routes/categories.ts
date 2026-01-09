@@ -1,5 +1,5 @@
 import express from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import {
   authenticate,
   AuthRequest,
@@ -313,7 +313,7 @@ router.delete(
       }
 
       // Delete category and all its items using transaction
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: any) => {
         // First, delete all items in this category
         await tx.menuItem.deleteMany({
           where: { categoryId: id },
@@ -361,14 +361,14 @@ router.delete(
       }
 
       // Delete all categories and items using transaction
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: any) => {
         // Get all category IDs for this menu
         const categoryIds = await tx.category.findMany({
           where: { menuId: menu.id },
           select: { id: true },
         });
 
-        const categoryIdList = categoryIds.map((c) => c.id);
+        const categoryIdList = categoryIds.map((c: { id: string }) => c.id);
 
         // First, delete all menu items in these categories
         if (categoryIdList.length > 0) {

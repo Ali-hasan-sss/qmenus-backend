@@ -2,21 +2,30 @@
   "name": "socket-service",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/socketServer.js",
+  "main": "dist/socket-service/src/socketServer.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/socketServer.ts",
     "build": "tsc -p .",
-    "start": "node dist/socketServer.js"
+    "prisma:generate": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma",
+    "build:full": "npm run prisma:generate && npm run build",
+    "postinstall": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma || echo 'Prisma generate skipped (file in use)'",
+    "prestart": "npm run build",
+    "start": "node dist/socket-service/src/socketServer.js"
   },
   "dependencies": {
     "express": "^4.19.2",
     "cors": "^2.8.5",
     "socket.io": "^4.7.5",
     "@prisma/client": "^5.22.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.8.2"
   },
   "devDependencies": {
+    "prisma": "^5.22.0",
     "typescript": "^5.6.3",
-    "ts-node-dev": "^2.0.0"
+    "ts-node-dev": "^2.0.0",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.10.0"
   }
 }

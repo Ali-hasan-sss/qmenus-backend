@@ -29,6 +29,10 @@ export const updateRestaurantSchema = Joi.object({
   logo: Joi.string().uri().allow("").optional().messages({
     "string.uri": "Logo must be a valid URL",
   }),
+  currency: Joi.string().length(3).uppercase().optional().messages({
+    "string.length": "Currency must be 3 characters long",
+    "string.uppercase": "Currency must be uppercase",
+  }),
   email: Joi.string().email().optional().messages({
     "string.email": "Please provide a valid email address",
   }),

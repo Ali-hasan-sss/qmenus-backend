@@ -1,8 +1,33 @@
 import { Resend } from "resend";
 import dotenv from "dotenv";
+import path from "path";
 import { createHash } from "crypto";
 
-dotenv.config();
+// Try to load .env from backend root directory
+const envPaths = [
+  path.join(__dirname, "../../../.env"), // backend/.env
+  path.join(__dirname, "../../../../.env"), // backend/.env (alternative)
+  path.join(process.cwd(), ".env"), // Current working directory
+  path.join(process.cwd(), "../.env"), // Parent directory
+];
+
+let envLoaded = false;
+for (const envPath of envPaths) {
+  try {
+    const result = dotenv.config({ path: envPath });
+    if (!result.error) {
+      envLoaded = true;
+      break;
+    }
+  } catch (error) {
+    // Continue to next path
+  }
+}
+
+// Fallback: try default dotenv.config() if no file found
+if (!envLoaded) {
+  dotenv.config();
+}
 // Initialize Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -34,6 +59,11 @@ export async function sendVerificationEmail(
   firstName: string,
   verificationCode: string
 ): Promise<boolean> {
+  // TEMPORARY: Email verification disabled - always return true
+  console.log("⚠️ Email verification disabled - skipping email send");
+  console.log("📧 Verification code for", email, ":", verificationCode);
+  return true;
+
   // Check if Resend configuration is available
   if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM) {
     console.log("⚠️ Resend configuration not available, skipping email send");
@@ -43,7 +73,7 @@ export async function sendVerificationEmail(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_FROM || "",
       to: [email],
       subject: "تحقق من بريدك الإلكتروني - QMenus",
       html: `
@@ -101,7 +131,7 @@ export async function sendPasswordResetEmail(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_FROM || "",
       to: [email],
       subject: "إعادة تعيين كلمة المرور - QMenus",
       html: `
@@ -159,7 +189,7 @@ export async function sendVerificationEmailEN(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_FROM || "",
       to: [email],
       subject: "Verify Your Email - QMenus",
       html: `
@@ -217,7 +247,7 @@ export async function sendPasswordResetEmailEN(
 
   try {
     const { data, error } = await resend.emails.send({
-      from: process.env.EMAIL_FROM,
+      from: process.env.EMAIL_FROM || "",
       to: [email],
       subject: "Reset Your Password - QMenus",
       html: `

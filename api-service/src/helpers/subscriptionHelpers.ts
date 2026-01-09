@@ -1,4 +1,4 @@
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 
 // Helper function to create activities
 export async function createActivity(
@@ -26,8 +26,7 @@ export async function createNotification(
   restaurantId: string,
   title: string,
   body: string,
-  type: string = "GENERAL",
-  io?: any
+  type: string = "GENERAL"
 ) {
   try {
     const notification = await prisma.notification.create({
@@ -38,29 +37,6 @@ export async function createNotification(
         type: type as any,
       },
     });
-
-    // Socket.io will be handled by socket-service
-    // if (io) {
-    //   io.to(`restaurant_${restaurantId}`).emit(
-    //     "new_notification",
-    //     notification
-    //   );
-
-    //   // Also broadcast unread count update
-    //   try {
-    //     const unreadCount = await prisma.notification.count({
-    //       where: {
-    //         restaurantId: restaurantId,
-    //         isRead: false,
-    //       },
-    //     });
-    //     io.to(`restaurant_${restaurantId}`).emit("restaurant_unread_count", {
-    //       unreadCount,
-    //     });
-    //   } catch (error) {
-    //     console.error("Error broadcasting unread count:", error);
-    //   }
-    // }
 
     return notification;
   } catch (error) {
@@ -75,8 +51,7 @@ export async function createNotificationByRole(
   title: string,
   body: string,
   type: string = "GENERAL",
-  restaurantId: string | null = null,
-  io?: any
+  restaurantId: string | null = null
 ) {
   try {
     // Get all users with the specified role
@@ -92,7 +67,7 @@ export async function createNotificationByRole(
 
     // Create notifications for all users with this role
     const notifications = await Promise.all(
-      users.map((user) =>
+      users.map((user: { id: string }) =>
         prisma.notification.create({
           data: {
             userId: user.id,
@@ -104,59 +79,6 @@ export async function createNotificationByRole(
         })
       )
     );
-
-    // Socket.io will be handled by socket-service
-    // if (io) {
-    //   users.forEach((user, index) => {
-    //     const room =
-    //       role === "ADMIN" ? `admin_${user.id}` : `restaurant_${restaurantId}`;
-    //     const eventName =
-    //       role === "ADMIN" ? "new_admin_notification" : "new_notification";
-    //     io.to(room).emit(eventName, {
-    //       id: notifications[index].id,
-    //       title,
-    //       body,
-    //       type,
-    //       isRead: false,
-    //       createdAt: new Date(),
-    //     });
-    //   });
-
-    //   // Broadcast unread count updates
-    //   if (role === "ADMIN") {
-    //     // Update unread count for all admin users
-    //     users.forEach(async (user) => {
-    //       try {
-    //         const unreadCount = await prisma.notification.count({
-    //           where: {
-    //             userId: user.id,
-    //             isRead: false,
-    //           },
-    //         });
-    //         io.to(`admin_${user.id}`).emit("admin_unread_count", {
-    //           unreadCount,
-    //         });
-    //       } catch (error) {
-    //         console.error("Error broadcasting admin unread count:", error);
-    //       }
-    //     });
-    //   } else if (restaurantId) {
-    //     // Update unread count for restaurant
-    //     try {
-    //       const unreadCount = await prisma.notification.count({
-    //         where: {
-    //           restaurantId: restaurantId,
-    //           isRead: false,
-    //         },
-    //       });
-    //       io.to(`restaurant_${restaurantId}`).emit("restaurant_unread_count", {
-    //         unreadCount,
-    //       });
-    //     } catch (error) {
-    //       console.error("Error broadcasting restaurant unread count:", error);
-    //     }
-    //   }
-    // }
 
     console.log(`✅ ${role} notifications sent to ${users.length} users`);
     return notifications;
@@ -171,14 +93,14 @@ export async function createAdminNotification(
   title: string,
   body: string,
   type: string = "GENERAL",
-  restaurantId: string = "",
-  io?: any
+  restaurantId: string = ""
 ) {
-  return createNotificationByRole("ADMIN", title, body, type, null, io);
+  return createNotificationByRole("ADMIN", title, body, type, null);
 }
 
-// Function to check expiring subscriptions (3 days before expiry)
-export async function checkExpiringSubscriptions(io?: any) {
+// Function to check expiring subscriptions (1 day before expiry)
+// NOTE: This function is kept for manual/admin use. Automatic checks are handled by jobs-service
+export async function checkExpiringSubscriptions() {
   try {
     console.log("📅 Checking expiring subscriptions...");
 
@@ -224,8 +146,7 @@ export async function checkExpiringSubscriptions(io?: any) {
           subscription.restaurantId,
           "تذكير: اشتراكك سينتهي غداً",
           `اشتراكك في الخطة ${subscription.plan.name} سينتهي غداً. يرجى تجديد اشتراكك للحفاظ على الخدمة دون انقطاع.`,
-          "GENERAL",
-          io
+          "GENERAL"
         );
 
         // Send notification to admin
@@ -233,8 +154,7 @@ export async function checkExpiringSubscriptions(io?: any) {
           "اشتراك ينتهي غداً",
           `اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name} ينتهي غداً`,
           "SUBSCRIPTION_EXPIRING",
-          subscription.restaurantId,
-          io
+          subscription.restaurantId
         );
 
         notificationsSent++;
@@ -252,7 +172,8 @@ export async function checkExpiringSubscriptions(io?: any) {
 }
 
 // Function to check and mark expired subscriptions
-export async function checkExpiredSubscriptions(io?: any) {
+// NOTE: This function is kept for manual/admin use. Automatic checks are handled by jobs-service
+export async function checkExpiredSubscriptions() {
   try {
     console.log("⏰ Checking expired subscriptions...");
 
@@ -288,8 +209,7 @@ export async function checkExpiredSubscriptions(io?: any) {
         subscription.restaurantId,
         "انتهى اشتراكك",
         `انتهى اشتراكك في الخطة ${subscription.plan.name}. يرجى تجديد اشتراكك لاستمرار استخدام الخدمة.`,
-        "GENERAL",
-        io
+        "GENERAL"
       );
 
       // Send notification to admin
@@ -297,8 +217,7 @@ export async function checkExpiredSubscriptions(io?: any) {
         "اشتراك انتهى",
         `انتهى اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name}`,
         "SUBSCRIPTION_EXPIRED",
-        subscription.restaurantId,
-        io
+        subscription.restaurantId
       );
 
       updatedCount++;
@@ -315,10 +234,11 @@ export async function checkExpiredSubscriptions(io?: any) {
 }
 
 // Function to run daily subscription checks
-export async function runDailySubscriptionChecks(io?: any) {
+// NOTE: This function is kept for manual/admin use. Automatic checks are handled by jobs-service
+export async function runDailySubscriptionChecks() {
   console.log("🔍 Running daily subscription checks...");
-  const expiringResult = await checkExpiringSubscriptions(io);
-  const expiredResult = await checkExpiredSubscriptions(io);
+  const expiringResult = await checkExpiringSubscriptions();
+  const expiredResult = await checkExpiredSubscriptions();
   console.log("✅ Daily subscription checks completed");
 
   return {

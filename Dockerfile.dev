@@ -1,0 +1,51 @@
+# Development Dockerfile
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+COPY shared/package*.json ./shared/
+COPY api-service/package*.json ./api-service/
+COPY socket-service/package*.json ./socket-service/
+COPY jobs-service/package*.json ./jobs-service/
+
+RUN npm ci
+
+# Generate Prisma Client
+COPY shared/prisma ./shared/prisma
+RUN npx prisma@5.22.0 generate --schema ./shared/prisma/schema.prisma
+
+# API Service
+FROM base AS api-service
+WORKDIR /app
+# Copy only source files, not node_modules or dist
+COPY shared ./shared
+COPY api-service/src ./api-service/src
+COPY api-service/package*.json ./api-service/
+COPY api-service/tsconfig.json ./api-service/
+EXPOSE 5000
+CMD ["npm", "run", "dev", "--prefix", "api-service"]
+
+# Socket Service
+FROM base AS socket-service
+WORKDIR /app
+# Copy only source files, not node_modules or dist
+COPY shared ./shared
+COPY socket-service/src ./socket-service/src
+COPY socket-service/package*.json ./socket-service/
+COPY socket-service/tsconfig.json ./socket-service/
+EXPOSE 5001
+CMD ["npm", "run", "dev", "--prefix", "socket-service"]
+
+# Jobs Service
+FROM base AS jobs-service
+WORKDIR /app
+# Copy only source files, not node_modules or dist
+COPY shared ./shared
+COPY jobs-service/src ./jobs-service/src
+COPY jobs-service/package*.json ./jobs-service/
+COPY jobs-service/tsconfig.json ./jobs-service/
+EXPOSE 5002
+CMD ["npm", "run", "dev", "--prefix", "jobs-service"]
+

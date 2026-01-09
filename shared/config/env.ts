@@ -1,6 +1,41 @@
 import dotenv from "dotenv";
 
-dotenv.config();
+// Try to load .env from backend root directory
+// dotenv.config() will automatically look for .env in:
+// 1. Current working directory
+// 2. Parent directories (up the tree)
+// 3. backend/.env (via process.cwd() when running from backend/)
+
+// First, try to load from backend/.env explicitly
+try {
+  // Try common paths for backend/.env
+  const possiblePaths = [
+    ".env", // Current directory
+    "../.env", // Parent directory
+    "../../.env", // Grandparent directory
+  ];
+
+  let loaded = false;
+  for (const envPath of possiblePaths) {
+    try {
+      const result = dotenv.config({ path: envPath });
+      if (!result.error) {
+        loaded = true;
+        break;
+      }
+    } catch {
+      // Continue to next path
+    }
+  }
+
+  // Fallback: try default dotenv.config()
+  if (!loaded) {
+    dotenv.config();
+  }
+} catch {
+  // If all fails, use default
+  dotenv.config();
+}
 
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",

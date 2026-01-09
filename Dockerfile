@@ -1,17 +1,13 @@
-# Multi-stage build for MyMenus Backend Services
-FROM node:18-alpine AS builder
+# Multi-stage build for all services
+FROM node:20-alpine AS base
 
-# Install build dependencies
-RUN apk add --no-cache python3 make g++
-
-# Set working directory
+# Install dependencies only when needed
+FROM base AS deps
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
-COPY prisma ./prisma/
-
-# Copy service package files
+COPY shared/package*.json ./shared/
 COPY api-service/package*.json ./api-service/
 COPY socket-service/package*.json ./socket-service/
 COPY jobs-service/package*.json ./jobs-service/
@@ -20,80 +16,84 @@ COPY jobs-service/package*.json ./jobs-service/
 RUN npm ci --include=dev
 
 # Generate Prisma Client
-RUN npx prisma generate --schema ./prisma/schema.prisma
+FROM base AS prisma
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY shared/prisma ./shared/prisma
+RUN npx prisma@5.22.0 generate --schema ./shared/prisma/schema.prisma
 
-# Copy source code
-COPY . .
-
-# Build all services
-RUN npm run build:all
-
-# Production stage
-FROM node:18-alpine
-
-# Install PM2 globally
-RUN npm install -g pm2
-
-# Create app directory
+# Build stage
+FROM base AS builder
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY prisma ./prisma/
+# Copy dependencies
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 
-# Copy service package files
-COPY api-service/package*.json ./api-service/
-COPY socket-service/package*.json ./socket-service/
-COPY jobs-service/package*.json ./jobs-service/
+# Copy source code
+COPY shared ./shared
+COPY api-service ./api-service
+COPY socket-service ./socket-service
+COPY jobs-service ./jobs-service
+
+# Build all services
+WORKDIR /app/api-service
+RUN npm run build
+
+WORKDIR /app/socket-service
+RUN npm run build
+
+WORKDIR /app/jobs-service
+RUN npm run build
+
+# Production stage
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nodejs
+
+# Copy built files
+COPY --from=builder --chown=nodejs:nodejs /app/api-service/dist ./api-service/dist
+COPY --from=builder --chown=nodejs:nodejs /app/socket-service/dist ./socket-service/dist
+COPY --from=builder --chown=nodejs:nodejs /app/jobs-service/dist ./jobs-service/dist
+
+# Copy necessary files
+COPY --from=builder --chown=nodejs:nodejs /app/api-service/package*.json ./api-service/
+COPY --from=builder --chown=nodejs:nodejs /app/socket-service/package*.json ./socket-service/
+COPY --from=builder --chown=nodejs:nodejs /app/jobs-service/package*.json ./jobs-service/
+COPY --from=builder --chown=nodejs:nodejs /app/shared ./shared
+COPY --from=builder --chown=nodejs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+
+# Copy scripts
+COPY --from=builder --chown=nodejs:nodejs /app/api-service/scripts ./api-service/scripts
 
 # Install production dependencies only
-RUN npm ci --only=production && \
-    cd api-service && npm ci --only=production && cd .. && \
-    cd socket-service && npm ci --only=production && cd .. && \
-    cd jobs-service && npm ci --only=production && cd ..
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production && npm cache clean --force
 
-# Generate Prisma Client for production
-RUN npx prisma generate --schema ./prisma/schema.prisma
+WORKDIR /app/api-service
+RUN npm ci --only=production && npm cache clean --force
 
-# Copy built files from builder
-COPY --from=builder /app/api-service/dist ./api-service/dist
-COPY --from=builder /app/socket-service/dist ./socket-service/dist
-COPY --from=builder /app/jobs-service/dist ./jobs-service/dist
+WORKDIR /app/socket-service
+RUN npm ci --only=production && npm cache clean --force
 
-# Copy shared config (needed at runtime)
-COPY --from=builder /app/shared ./shared
+WORKDIR /app/jobs-service
+RUN npm ci --only=production && npm cache clean --force
 
-# Verify critical files exist (list structure for debugging)
-RUN echo "📁 Checking built files structure..." && \
-    echo "API service files:" && find ./api-service/dist -name "app.js" -type f 2>/dev/null | head -5 && \
-    echo "Socket service files:" && find ./socket-service/dist -name "socketServer.js" -type f 2>/dev/null | head -5 && \
-    echo "Jobs service files:" && find ./jobs-service/dist -name "index.js" -type f 2>/dev/null | head -5 && \
-    echo "✅ File structure checked (files will be verified at runtime)"
+# Install PM2 globally for pm2-runtime
+RUN npm install -g pm2
 
-# Copy ecosystem config and scripts
-COPY ecosystem.config.js ./
-COPY scripts/ ./scripts/
+# Copy PM2 config
+COPY --chown=nodejs:nodejs pm2.config.js ./
 
-# Copy Prisma seed files
-COPY prisma/seed.js ./prisma/
-COPY prisma/seed.ts ./prisma/
+USER nodejs
 
-# Install netcat for health checks
-RUN apk add --no-cache netcat-openbsd
-
-# Make entrypoint script executable
-RUN chmod +x scripts/docker-entrypoint.sh
-
-# Create logs directory
-RUN mkdir -p logs
-
-# Expose ports
 EXPOSE 5000 5001 5002
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-
-# Use entrypoint script
-ENTRYPOINT ["sh", "scripts/docker-entrypoint.sh"]
+CMD ["pm2-runtime", "start", "pm2.config.js"]
 

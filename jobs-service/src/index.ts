@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import express from "express";
 import { env } from "../../shared/config/env";
-import prisma from "../../shared/config/db";
+import { runDailySubscriptionChecks } from "./tasks/subscriptionHelpers";
 
 console.log("[jobs-service] starting...");
 
@@ -9,7 +9,7 @@ console.log("[jobs-service] starting...");
 const app = express();
 
 // Health check endpoint
-app.get("/health", (_req, res) => {
+app.get("/health", (_req: express.Request, res: express.Response) => {
   res.json({
     ok: true,
     service: "jobs",
@@ -24,9 +24,6 @@ app.listen(port, () => {
   console.log(`[jobs-service] health check server running on port ${port}`);
 });
 
-// TODO: Import subscription helpers from tasks/subscriptionHelpers.ts
-// import { runDailySubscriptionChecks } from './tasks/subscriptionHelpers';
-
 // Health check function
 const healthCheck = () => {
   console.log(
@@ -34,18 +31,16 @@ const healthCheck = () => {
   );
 };
 
-// TODO: Schedule cron jobs here (migrated from legacy backend/src/index.ts)
-// - Daily subscription checks at 9:00 AM Damascus time
-// - Email reminders
-// - Cleanup tasks
-
-// Example cron job structure (to be uncommented after migration):
-/*
+// Schedule daily subscription checks at 9:00 AM Damascus time
 const dailyCheckTask = cron.schedule(
   "0 9 * * *",
-  () => {
+  async () => {
     console.log("⏰ Running scheduled daily subscription checks...");
-    // runDailySubscriptionChecks();
+    try {
+      await runDailySubscriptionChecks();
+    } catch (error) {
+      console.error("❌ Error running daily subscription checks:", error);
+    }
   },
   {
     timezone: "Asia/Damascus",
@@ -56,8 +51,9 @@ console.log("✅ Daily subscription check scheduled: 9:00 AM Damascus time");
 
 // Run initial subscription check on startup
 console.log("🔍 Running initial subscription check...");
-// runDailySubscriptionChecks();
-*/
+runDailySubscriptionChecks().catch((error) => {
+  console.error("❌ Error running initial subscription check:", error);
+});
 
 healthCheck();
 

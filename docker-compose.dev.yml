@@ -1,37 +1,117 @@
-version: "3.8"
-
-# Development docker-compose with hot reload
 services:
+  # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: mymenus-postgres-dev
+    image: postgres:16-alpine
+    container_name: qmenus-postgres-dev
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: mymenus_user
-      POSTGRES_PASSWORD: mymenus_password
-      POSTGRES_DB: mymenus
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-qmenus}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
+      - postgres_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
-      - mymenus-dev-network
-    restart: unless-stopped
+      - qmenus-network-dev
 
-  redis:
-    image: redis:7-alpine
-    container_name: mymenus-redis-dev
+  # API Service
+  api-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: api-service
+    container_name: qmenus-api-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-qmenus}?schema=public
+      API_PORT: ${API_PORT:-5000}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-key}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL:-http://localhost:5001}
+      REDIS_URL: ${REDIS_URL:-}
     ports:
-      - "6379:6379"
+      - "${API_PORT:-5000}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
-      - redis_dev_data:/data
+      - ./api-service:/app/api-service
+      - ./shared:/app/shared
+      - /app/api-service/node_modules
+      - /app/shared/node_modules
+    working_dir: /app/api-service
+    command: npm run dev
     networks:
-      - mymenus-dev-network
-    restart: unless-stopped
+      - qmenus-network-dev
 
-volumes:
-  postgres_dev_data:
-  redis_dev_data:
+  # Socket Service
+  socket-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: socket-service
+    container_name: qmenus-socket-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-qmenus}?schema=public
+      SOCKET_PORT: ${SOCKET_PORT:-5001}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      REDIS_URL: ${REDIS_URL:-}
+    ports:
+      - "${SOCKET_PORT:-5001}:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./socket-service:/app/socket-service
+      - ./shared:/app/shared
+      - /app/socket-service/node_modules
+      - /app/shared/node_modules
+    working_dir: /app/socket-service
+    command: npm run dev
+    networks:
+      - qmenus-network-dev
+
+  # Jobs Service
+  jobs-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: jobs-service
+    container_name: qmenus-jobs-dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-qmenus}?schema=public
+      JOBS_PORT: ${JOBS_PORT:-5002}
+    ports:
+      - "${JOBS_PORT:-5002}:5002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./jobs-service:/app/jobs-service
+      - ./shared:/app/shared
+      - /app/jobs-service/node_modules
+      - /app/shared/node_modules
+    working_dir: /app/jobs-service
+    command: npm run dev
+    networks:
+      - qmenus-network-dev
 
 networks:
-  mymenus-dev-network:
+  qmenus-network-dev:
     driver: bridge
+
+volumes:
+  postgres_data_dev:
+    driver: local

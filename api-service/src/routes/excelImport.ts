@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validatePlanLimits } from "../middleware/planLimits";
 import Joi from "joi";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 
 const router = express.Router();
 

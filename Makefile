@@ -1,53 +1,70 @@
-# Makefile for Docker operations
-.PHONY: help build up down restart logs ps exec shell migrate seed clean
+.PHONY: build up down logs restart clean deploy test
 
-help: ## عرض جميع الأوامر المتاحة
-	@echo "أوامر Docker المتاحة:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
-
-build: ## بناء Docker images
+# Build Docker images
+build:
 	docker-compose build
 
-up: ## تشغيل جميع الخدمات
+# Start services
+up:
 	docker-compose up -d
 
-down: ## إيقاف جميع الخدمات
+# Stop services
+down:
 	docker-compose down
 
-restart: ## إعادة تشغيل جميع الخدمات
+# View logs
+logs:
+	docker-compose logs -f
+
+# Restart services
+restart:
 	docker-compose restart
 
-logs: ## عرض السجلات
-	docker-compose logs -f backend
-
-ps: ## عرض حالة الخدمات
-	docker-compose ps
-
-exec: ## تنفيذ أمر في backend container (استخدم: make exec CMD="npm run db:deploy")
-	docker-compose exec backend $(CMD)
-
-shell: ## فتح shell في backend container
-	docker-compose exec backend sh
-
-migrate: ## تشغيل migrations
-	docker-compose exec backend npm run db:deploy
-
-seed: ## تشغيل seed
-	docker-compose exec backend npm run db:seed
-
-init-db: ## تهيئة قاعدة البيانات (migrations + seeding)
-	docker-compose exec backend npm run db:init
-
-clean: ## حذف جميع containers والvolumes
+# Clean everything (including volumes)
+clean:
 	docker-compose down -v
 	docker system prune -f
 
-rebuild: ## إعادة بناء وتشغيل
-	docker-compose up -d --build
+# Deploy to production
+deploy:
+	./scripts/deploy.sh
 
-status: ## عرض حالة PM2 داخل container
-	docker-compose exec backend pm2 status
+# Setup SSL certificates
+ssl:
+	./scripts/setup-ssl.sh
 
-pm2-logs: ## عرض سجلات PM2
-	docker-compose exec backend pm2 logs
+# Test services
+test:
+	@echo "Testing API..."
+	@curl -f http://localhost:5000/api/public/health || echo "API not responding"
+	@echo "\nTesting Socket..."
+	@curl -f http://localhost:5001/health || echo "Socket not responding"
 
+# Database backup
+backup:
+	@mkdir -p backups
+	@docker-compose exec -T postgres pg_dump -U postgres qmenus > backups/backup_$$(date +%Y%m%d_%H%M%S).sql
+	@echo "Backup created in backups/"
+
+# Database restore
+restore:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make restore FILE=backups/backup_file.sql"; \
+		exit 1; \
+	fi
+	@docker-compose exec -T postgres psql -U postgres qmenus < $(FILE)
+	@echo "Database restored from $(FILE)"
+
+# Show service status
+status:
+	@docker-compose ps
+	@echo "\n--- Service Health ---"
+	@curl -s http://localhost/api/public/health | jq . || echo "API health check failed"
+
+# Enter backend container
+shell:
+	docker-compose exec backend sh
+
+# Enter database
+db:
+	docker-compose exec postgres psql -U postgres qmenus

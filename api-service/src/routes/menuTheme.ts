@@ -1,5 +1,5 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import {
   authenticate,
   AuthRequest,

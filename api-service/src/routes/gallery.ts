@@ -1,5 +1,5 @@
 import express from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { requireAdmin } from "../middleware/adminAuth";
 import Joi from "joi";
@@ -110,10 +110,12 @@ router.get(
       res.json({
         success: true,
         data: {
-          categories: categories.map((cat) => ({
-            name: cat.category,
-            count: cat._count.id,
-          })),
+          categories: categories.map(
+            (cat: { category: string; _count: { id: number } }) => ({
+              name: cat.category,
+              count: cat._count.id,
+            })
+          ),
         },
       });
     } catch (error) {
@@ -404,10 +406,12 @@ router.get(
           total,
           active,
           inactive: total - active,
-          byCategory: byCategory.map((cat) => ({
-            category: cat.category,
-            count: cat._count.id,
-          })),
+          byCategory: byCategory.map(
+            (cat: { category: string; _count: { id: number } }) => ({
+              category: cat.category,
+              count: cat._count.id,
+            })
+          ),
         },
       });
     } catch (error) {

@@ -1,31 +1,31 @@
-version: "3.8"
-
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: mymenus-postgres
+    image: postgres:16-alpine
+    container_name: qmenus-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-mymenus_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mymenus_password}
-      POSTGRES_DB: ${POSTGRES_DB:-mymenus}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-qmenus}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mymenus_user}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - mymenus-network
-    restart: unless-stopped
+      - qmenus-network
 
-  # Redis (optional, for future use)
+  # Redis for caching and sessions
   redis:
     image: redis:7-alpine
-    container_name: mymenus-redis
+    container_name: qmenus-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -36,104 +36,79 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - mymenus-network
-    restart: unless-stopped
-    profiles:
-      - with-redis
+      - qmenus-network
 
-  # Backend Services (all services in one container with PM2)
+  # Backend Services (All in one container)
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mymenus-backend
+    container_name: qmenus-backend
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      # Database
-      DATABASE_URL: postgresql://${POSTGRES_USER:-mymenus_user}:${POSTGRES_PASSWORD:-mymenus_password}@postgres:5432/${POSTGRES_DB:-mymenus}?schema=public
-
-      # JWT
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-
-      # Ports
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-qmenus}?schema=public
       API_PORT: ${API_PORT:-5000}
       SOCKET_PORT: ${SOCKET_PORT:-5001}
       JOBS_PORT: ${JOBS_PORT:-5002}
-      NODE_ENV: ${NODE_ENV:-production}
-
-      # CORS
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
-
-      # Cloudinary
-      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
-      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
-      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
-
-      # File Upload
-      MAX_FILE_SIZE: ${MAX_FILE_SIZE:-5242880}
-      ALLOWED_FILE_TYPES: ${ALLOWED_FILE_TYPES:-image/jpeg,image/png,image/webp}
-
-      # Rate Limiting
-      AUTH_RATE_LIMIT_WINDOW_MS: ${AUTH_RATE_LIMIT_WINDOW_MS:-60000}
-      AUTH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_RATE_LIMIT_MAX_REQUESTS:-5}
-      GENERAL_RATE_LIMIT_WINDOW_MS: ${GENERAL_RATE_LIMIT_WINDOW_MS:-900000}
-      GENERAL_RATE_LIMIT_MAX_REQUESTS: ${GENERAL_RATE_LIMIT_MAX_REQUESTS:-200}
-      PUBLIC_RATE_LIMIT_WINDOW_MS: ${PUBLIC_RATE_LIMIT_WINDOW_MS:-900000}
-      PUBLIC_RATE_LIMIT_MAX_REQUESTS: ${PUBLIC_RATE_LIMIT_MAX_REQUESTS:-1000}
-      ORDER_TRACKING_RATE_LIMIT_WINDOW_MS: ${ORDER_TRACKING_RATE_LIMIT_WINDOW_MS:-60000}
-      ORDER_TRACKING_RATE_LIMIT_MAX_REQUESTS: ${ORDER_TRACKING_RATE_LIMIT_MAX_REQUESTS:-30}
-
-      # Socket Service
-      SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL:-http://localhost:5001}
-
-      # Redis
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-
-      # Email
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-change-in-production}
+      FRONTEND_URL: ${FRONTEND_URL:-https://qmenussy.com}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      EMAIL_FROM: ${EMAIL_FROM:-QMenus <noreply@yourdomain.com>}
-
-      # Optional
-      SKIP_EMAIL_VERIFICATION: ${SKIP_EMAIL_VERIFICATION:-}
-
-      # Database Initialization
-      # Set to "true" or "1" to run migrations and seeding on first start
-      RUN_DB_INIT: ${RUN_DB_INIT:-true}
-      
-      # PostgreSQL Wait (for docker-compose only)
-      # Set to "true" to wait for postgres service, "false" for external databases
-      WAIT_FOR_POSTGRES: ${WAIT_FOR_POSTGRES:-true}
-    ports:
-      - "${API_PORT:-5000}:5000"
-      - "${SOCKET_PORT:-5001}:5001"
-      - "${JOBS_PORT:-5002}:5002"
-    volumes:
-      - ./logs:/app/logs
+      SOCKET_SERVICE_URL: ${SOCKET_SERVICE_URL:-http://backend:5001}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    expose:
+      - "5000"
+      - "5001"
+      - "5002"
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api-service/logs:/app/api-service/logs
+      - ./socket-service/logs:/app/socket-service/logs
+      - ./jobs-service/logs:/app/jobs-service/logs
     networks:
-      - mymenus-network
+      - qmenus-network
+    command: >
+      sh -c "
+        echo 'Waiting for database and redis...' &&
+        sleep 5 &&
+        cd /app/api-service &&
+        npx prisma@5.22.0 migrate deploy --schema ../shared/prisma/schema.prisma &&
+        node scripts/check-and-seed.js &&
+        cd /app &&
+        pm2-runtime start pm2.config.js
+      "
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: qmenus-nginx
     restart: unless-stopped
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "require('http').get('http://localhost:5000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - backend
+    networks:
+      - qmenus-network
+
+networks:
+  qmenus-network:
+    driver: bridge
 
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
-
-networks:
-  mymenus-network:
-    driver: bridge

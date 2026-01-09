@@ -1,0 +1,555 @@
+generator client {
+  provider = "prisma-client-js"
+  // Output will be generated in each service's node_modules
+}
+
+// Note: This project uses Prisma 5.22.0, which requires 'url' in datasource.
+// The linter warning about Prisma 7 is a false positive from IDE extension.
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                      String         @id @default(cuid())
+  email                   String         @unique
+  password                String
+  firstName               String
+  lastName                String
+  role                    UserRole       @default(OWNER)
+  isActive                Boolean        @default(true)
+  emailVerified           Boolean        @default(false)
+  verificationCode        String?
+  verificationCodeExpires DateTime?
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  notifications           Notification[]
+  cashierOrders           Order[]        @relation("OrderCashier")
+  createdPlans            Plan[]         @relation("PlanCreator")
+  restaurants             Restaurant[]   @relation("RestaurantOwner")
+
+  @@map("users")
+}
+
+model Restaurant {
+  id              String              @id @default(cuid())
+  name            String
+  nameAr          String?
+  description     String?
+  descriptionAr   String?
+  logo            String?
+  address         String?
+  phone           String?
+  email           String?
+  website         String?
+  currency        String              @default("USD")
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  ownerId         String
+  kitchenWhatsApp String?
+  categories      Category[]
+  invoices        Invoice[]
+  menu_items      MenuItem[]
+  menuTheme       MenuTheme?
+  menus           Menu[]
+  notifications   Notification[]
+  orders          Order[]
+  qrCodes         QRCode[]
+  theme           RestaurantTheme?
+  settings        RestaurantSettings?
+  owner           User                @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  subscriptions   Subscription[]
+  kitchenSections KitchenSection[]
+
+  @@map("restaurants")
+}
+
+model Plan {
+  id                String         @id @default(cuid())
+  name              String
+  nameAr            String?
+  description       String?
+  descriptionAr     String?
+  type              PlanType
+  price             Decimal        @db.Decimal(10, 2)
+  currency          String         @default("USD")
+  duration          Int
+  maxTables         Int
+  maxMenus          Int            @default(1)
+  maxCategories     Int            @default(1)
+  maxItems          Int            @default(5)
+  canCustomizeTheme Boolean        @default(false)
+  features          String[]
+  isActive          Boolean        @default(true)
+  isFree            Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  creatorId         String
+  invoices          Invoice[]
+  creator           User           @relation("PlanCreator", fields: [creatorId], references: [id])
+  subscriptions     Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id           String             @id @default(cuid())
+  status       SubscriptionStatus @default(ACTIVE)
+  startDate    DateTime
+  endDate      DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  restaurantId String
+  planId       String
+  invoices     Invoice[]
+  plan         Plan               @relation(fields: [planId], references: [id])
+  restaurant   Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model QRCode {
+  id           String     @id @default(cuid())
+  tableNumber  String
+  qrCode       String     @unique
+  isActive     Boolean    @default(true)
+  isOccupied   Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String
+  orders       Order[]
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("qr_codes")
+}
+
+model Menu {
+  id           String     @id @default(cuid())
+  name         String
+  nameAr       String?
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String
+  categories   Category[]
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("menus")
+}
+
+model Category {
+  id            String     @id @default(cuid())
+  name          String
+  image         String?
+  nameAr        String?
+  description   String?
+  descriptionAr String?
+  sortOrder     Int        @default(0)
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  menuId        String
+  order         Int        @default(0)
+  restaurantId  String
+  menu          Menu       @relation(fields: [menuId], references: [id])
+  restaurants   Restaurant @relation(fields: [restaurantId], references: [id])
+  items         MenuItem[]
+
+  @@map("categories")
+}
+
+model MenuItem {
+  id                 String               @id @default(cuid())
+  name               String
+  nameAr             String?
+  description        String?
+  descriptionAr      String?
+  price              Decimal              @db.Decimal(10, 2)
+  image              String?
+  sortOrder          Int                  @default(0)
+  isAvailable        Boolean              @default(true)
+  discount           Int                  @default(0)
+  extras             Json?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  categoryId         String
+  allergens          String?
+  calories           Int?
+  cookingMethod      String?
+  cost               Decimal?             @db.Decimal(10, 2)
+  dietaryInfo        String?
+  ingredients        String?
+  isFeatured         Boolean              @default(false)
+  nutritionalInfo    String?
+  order              Int                  @default(0)
+  preparationTime    Int?
+  servingSize        String?
+  spiceLevel         Int?
+  tags               String?
+  restaurantId       String
+  menu_item_extras   menu_item_extras[]
+  menu_item_variants menu_item_variants[]
+  category           Category             @relation(fields: [categoryId], references: [id])
+  restaurants        Restaurant           @relation(fields: [restaurantId], references: [id])
+  orderItems         OrderItem[]
+  kitchenSectionId   String?
+  kitchenSection     KitchenSection?      @relation(fields: [kitchenSectionId], references: [id])
+
+  @@map("menu_items")
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderType       OrderType   @default(DINE_IN)
+  tableNumber     String?
+  subtotal        Decimal?    @db.Decimal(10, 2)
+  taxes           Json?
+  totalPrice      Decimal     @db.Decimal(10, 2)
+  currency        String      @default("USD")
+  status          OrderStatus @default(PENDING)
+  customerName    String?
+  customerPhone   String?
+  customerAddress String?
+  customerIP      String?
+  notes           String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  restaurantId    String
+  qrCodeId        String?
+  cashierId       String?
+  items           OrderItem[]
+  cashier         User?       @relation("OrderCashier", fields: [cashierId], references: [id])
+  qrCode          QRCode?     @relation(fields: [qrCodeId], references: [id])
+  restaurant      Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String            @id @default(cuid())
+  quantity          Int
+  price             Decimal           @db.Decimal(10, 2)
+  notes             String?
+  extras            Json?
+  customItemName    String?
+  customItemNameAr  String?
+  isCustomItem      Boolean           @default(false)
+  kitchenItemStatus KitchenItemStatus @default(PENDING)
+  orderId           String
+  menuItemId        String?
+  menuItem          MenuItem?         @relation(fields: [menuItemId], references: [id])
+  order             Order             @relation(fields: [orderId], references: [id])
+
+  @@map("order_items")
+}
+
+model RestaurantTheme {
+  id             String     @id @default(cuid())
+  primaryColor   String     @default("#3B82F6")
+  secondaryColor String     @default("#1E40AF")
+  fontFamily     String     @default("Inter")
+  logo           String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  restaurantId   String     @unique
+  restaurant     Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("restaurant_themes")
+}
+
+model RestaurantSettings {
+  id           String     @id @default(cuid())
+  taxes        Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String     @unique
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("restaurant_settings")
+}
+
+model Gallery {
+  id          String   @id @default(cuid())
+  name        String
+  nameAr      String
+  description String?
+  imageUrl    String
+  category    String   @default("general")
+  tags        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  uploadedBy  String?
+  usageCount  Int      @default(0)
+
+  @@index([name])
+  @@index([nameAr])
+  @@index([category])
+  @@index([isActive])
+  @@map("gallery")
+}
+
+model MenuTheme {
+  id                       String     @id @default(cuid())
+  layoutType               String     @default("grid")
+  showPrices               Boolean    @default(true)
+  showImages               Boolean    @default(true)
+  showDescriptions         Boolean    @default(true)
+  primaryColor             String     @default("#3B82F6")
+  secondaryColor           String     @default("#1E40AF")
+  backgroundColor          String     @default("#FFFFFF")
+  textColor                String     @default("#1F2937")
+  accentColor              String     @default("#F59E0B")
+  primaryColorOpacity      Float      @default(1.0)
+  secondaryColorOpacity    Float      @default(1.0)
+  backgroundColorOpacity   Float      @default(1.0)
+  textColorOpacity         Float      @default(1.0)
+  accentColorOpacity       Float      @default(1.0)
+  fontFamily               String     @default("Inter")
+  headingSize              String     @default("text-2xl")
+  bodySize                 String     @default("text-base")
+  priceSize                String     @default("text-lg")
+  cardPadding              String     @default("p-4")
+  cardMargin               String     @default("m-2")
+  borderRadius             String     @default("rounded-lg")
+  categoryStyle            String     @default("tabs")
+  showCategoryImages       Boolean    @default(false)
+  itemLayout               String     @default("vertical")
+  imageAspect              String     @default("square")
+  backgroundImage          String?
+  backgroundOverlay        String?
+  backgroundPosition       String     @default("center")
+  backgroundSize           String     @default("cover")
+  backgroundRepeat         String     @default("no-repeat")
+  backgroundOverlayOpacity Float      @default(0.5)
+  customBackgroundImage    String?
+  customCSS                String?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+  restaurantId             String     @unique
+  restaurant               Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("menu_themes")
+}
+
+model Notification {
+  id           String           @id @default(cuid())
+  restaurantId String?
+  userId       String?
+  title        String
+  body         String
+  type         NotificationType @default(GENERAL)
+  isRead       Boolean          @default(false)
+  orderId      String?
+  createdAt    DateTime         @default(now())
+  restaurant   Restaurant?      @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Invoice {
+  id                String        @id @default(cuid())
+  invoiceNumber     String        @unique
+  type              InvoiceType
+  status            InvoiceStatus @default(PENDING)
+  amount            Decimal       @db.Decimal(10, 2)
+  currency          String        @default("USD")
+  description       String?
+  notes             String?
+  customerName      String
+  customerEmail     String
+  customerPhone     String?
+  restaurantName    String
+  restaurantAddress String?
+  subscriptionId    String?
+  planId            String?
+  planName          String?
+  planDuration      Int?
+  issueDate         DateTime      @default(now())
+  dueDate           DateTime?
+  paidDate          DateTime?
+  taxAmount         Decimal?      @db.Decimal(10, 2)
+  discountAmount    Decimal?      @db.Decimal(10, 2)
+  totalAmount       Decimal       @db.Decimal(10, 2)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  restaurantId      String
+  plan              Plan?         @relation(fields: [planId], references: [id])
+  restaurant        Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@map("invoices")
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  type      String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("activities")
+}
+
+model PasswordReset {
+  id        String   @id @default(cuid())
+  email     String
+  resetCode String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@map("password_resets")
+}
+
+model EmailVerification {
+  email      String    @id
+  code       String
+  expiresAt  DateTime
+  verified   Boolean   @default(false)
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("email_verifications")
+}
+
+model menu_item_extras {
+  id            String   @id
+  name          String
+  price         Decimal  @default(0) @db.Decimal(10, 2)
+  isRequired    Boolean  @default(false)
+  maxSelections Int      @default(1)
+  menuItemId    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  menu_items    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+}
+
+model menu_item_variants {
+  id            String   @id
+  name          String
+  priceModifier Decimal  @default(0) @db.Decimal(10, 2)
+  isDefault     Boolean  @default(false)
+  menuItemId    String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime
+  menu_items    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+}
+
+enum UserRole {
+  OWNER
+  CASHIER
+  ADMIN
+}
+
+enum PlanType {
+  FREE
+  BASIC
+  PREMIUM
+  ENTERPRISE
+}
+
+enum NotificationType {
+  GENERAL
+  NEW_ORDER
+  ORDER_UPDATE
+  WELCOME
+  SUBSCRIPTION
+  SUBSCRIPTION_CREATED
+  SUBSCRIPTION_EXPIRING
+  SUBSCRIPTION_EXPIRED
+  SUBSCRIPTION_CANCELLED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_UPGRADED
+  RESTAURANT_REGISTRATION
+  CANCELLATION
+  UPGRADE
+  ADMIN_NOTIFICATION
+  WAITER_REQUEST
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderType {
+  DINE_IN
+  DELIVERY
+}
+
+enum KitchenItemStatus {
+  PENDING
+  PREPARING
+  COMPLETED
+}
+
+model KitchenSection {
+  id           String     @id @default(cuid())
+  name         String
+  nameAr       String?
+  sortOrder    Int        @default(0)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  menuItems    MenuItem[]
+
+  @@index([restaurantId])
+  @@map("kitchen_sections")
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  RENEWAL
+  UPGRADE
+  REFUND
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum SectionType {
+  GENERAL
+  CONTACT
+  ANNOUNCEMENTS
+}
+
+model Section {
+  id            String      @id @default(cuid())
+  title         String
+  titleAr       String
+  description   String?     @db.Text
+  descriptionAr String?     @db.Text
+  images        Json? // Array of image URLs
+  attributes    Json? // Array of SectionAttribute objects
+  type          SectionType @default(GENERAL)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([type])
+  @@map("sections")
+}

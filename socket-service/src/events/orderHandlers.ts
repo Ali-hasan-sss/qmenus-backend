@@ -143,8 +143,28 @@ export const setupSocketHandlers = (io: Server) => {
             items: {
               include: {
                 menuItem: {
-                  include: {
-                    category: true,
+                  select: {
+                    id: true,
+                    name: true,
+                    nameAr: true,
+                    description: true,
+                    descriptionAr: true,
+                    price: true,
+                    image: true,
+                    sortOrder: true,
+                    isAvailable: true,
+                    discount: true,
+                    extras: true,
+                    categoryId: true,
+                    category: {
+                      select: {
+                        id: true,
+                        name: true,
+                        nameAr: true,
+                      },
+                    },
+                    createdAt: true,
+                    updatedAt: true,
                   },
                 },
               },
@@ -197,7 +217,32 @@ export const setupSocketHandlers = (io: Server) => {
         const restaurant = await prisma.restaurant.findUnique({
           where: { id: restaurantId },
           include: {
-            menus: { include: { categories: { include: { items: true } } } },
+            menus: {
+              include: {
+                categories: {
+                  include: {
+                    items: {
+                      select: {
+                        id: true,
+                        name: true,
+                        nameAr: true,
+                        description: true,
+                        descriptionAr: true,
+                        price: true,
+                        image: true,
+                        sortOrder: true,
+                        isAvailable: true,
+                        discount: true,
+                        extras: true,
+                        categoryId: true,
+                        createdAt: true,
+                        updatedAt: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
         });
 
@@ -216,18 +261,66 @@ export const setupSocketHandlers = (io: Server) => {
         // Find QR code for this table if it's a dine-in order
         let qrCodeId = null;
         if (orderType === "DINE_IN" && tableNumber) {
+          console.log(
+            `🔍 [Socket] Looking for QR code - Restaurant: ${restaurantId}, Table: ${tableNumber}`
+          );
+
+          // Normalize tableNumber to string to ensure consistent matching
+          const normalizedTableNumber = String(tableNumber).trim();
+
           const qrCode = await prisma.qRCode.findFirst({
             where: {
               restaurantId,
-              tableNumber,
+              tableNumber: normalizedTableNumber,
+              isActive: true,
+            },
+            select: {
+              id: true,
+              tableNumber: true,
+              isOccupied: true,
             },
           });
-          if (qrCode) {
-            qrCodeId = qrCode.id;
+
+          if (!qrCode) {
             console.log(
-              `📋 Found QR Code: ${qrCodeId} for table ${tableNumber}`
+              `❌ [Socket] QR code not found for Restaurant: ${restaurantId}, Table: ${normalizedTableNumber} (type: ${typeof tableNumber})`
             );
+            socket.emit("order_error", {
+              message: "Invalid table number or QR code",
+            });
+            return;
           }
+
+          console.log(
+            `🔍 [Socket] Found QR Code - Table: ${qrCode.tableNumber}, QR ID: ${qrCode.id}, Prisma isOccupied: ${qrCode.isOccupied}`
+          );
+
+          // Check if table is occupied (session is active)
+          // Use raw query to ensure we get the correct value from database
+          const occupiedResult = await prisma.$queryRaw<
+            Array<{ isOccupied: boolean }>
+          >`
+            SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+          `;
+          const isOccupied = occupiedResult[0]?.isOccupied ?? false;
+
+          console.log(
+            `🔍 [Socket] Table ${normalizedTableNumber} (QR ID: ${qrCode.id}) - Raw query isOccupied: ${isOccupied}, Raw result:`,
+            occupiedResult
+          );
+
+          if (!isOccupied) {
+            socket.emit("order_error", {
+              message:
+                "Table is not occupied. Please ask the cashier to start a session for this table.",
+            });
+            return;
+          }
+
+          qrCodeId = qrCode.id;
+          console.log(
+            `📋 Found QR Code: ${qrCodeId} for table ${tableNumber} (occupied: ${isOccupied})`
+          );
         }
 
         // Validate and create order items
@@ -250,6 +343,7 @@ export const setupSocketHandlers = (io: Server) => {
             quantity: item.quantity,
             price: parseFloat(foundItem.price) || 0,
             notes: item.notes,
+            kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
           };
         });
 
@@ -288,8 +382,28 @@ export const setupSocketHandlers = (io: Server) => {
             items: {
               include: {
                 menuItem: {
-                  include: {
-                    category: true,
+                  select: {
+                    id: true,
+                    name: true,
+                    nameAr: true,
+                    description: true,
+                    descriptionAr: true,
+                    price: true,
+                    image: true,
+                    sortOrder: true,
+                    isAvailable: true,
+                    discount: true,
+                    extras: true,
+                    categoryId: true,
+                    category: {
+                      select: {
+                        id: true,
+                        name: true,
+                        nameAr: true,
+                      },
+                    },
+                    createdAt: true,
+                    updatedAt: true,
                   },
                 },
               },
@@ -319,6 +433,24 @@ export const setupSocketHandlers = (io: Server) => {
           order,
           message: "New order received",
         });
+
+        // Emit KDS update with source "customer" to trigger visual/audio effects
+        console.log(
+          `📤 [Socket] Sending KDS update with source: customer for new order ${order.id}`
+        );
+        io.to(`restaurant_${restaurantId}`).emit("kds_update", {
+          orderItem: {
+            id: "new-order",
+            order: order,
+          },
+          restaurantId: restaurantId,
+          timestamp: new Date().toISOString(),
+          source: "customer", // Indicate this is from customer creating new order
+          orderId: order.id,
+        });
+        console.log(
+          `✅ [Socket] KDS update sent with source: customer for new order`
+        );
       } catch (error: any) {
         console.error("[socket-service] Create order error:", error);
         socket.emit("order_error", {
@@ -341,8 +473,28 @@ export const setupSocketHandlers = (io: Server) => {
             items: {
               include: {
                 menuItem: {
-                  include: {
-                    category: true,
+                  select: {
+                    id: true,
+                    name: true,
+                    nameAr: true,
+                    description: true,
+                    descriptionAr: true,
+                    price: true,
+                    image: true,
+                    sortOrder: true,
+                    isAvailable: true,
+                    discount: true,
+                    extras: true,
+                    categoryId: true,
+                    category: {
+                      select: {
+                        id: true,
+                        name: true,
+                        nameAr: true,
+                      },
+                    },
+                    createdAt: true,
+                    updatedAt: true,
                   },
                 },
               },
@@ -421,21 +573,77 @@ export const setupSocketHandlers = (io: Server) => {
             return;
           }
 
-          const notification = await prisma.notification.create({
-            data: {
-              restaurantId,
-              type: "WAITER_REQUEST",
-              title:
-                orderType === "DINE_IN"
-                  ? `طلب نادل من الطاولة ${tableNumber}`
-                  : "طلب نادل من طلب التوصيل",
-              body:
-                orderType === "DINE_IN"
-                  ? `الزبون في الطاولة ${tableNumber} يطلب النادل`
-                  : "زبون التوصيل يطلب النادل",
-              isRead: false,
-            },
-          });
+          // For dine-in orders, check if table session is active
+          if (orderType === "DINE_IN" && tableNumber) {
+            const normalizedTableNumber = String(tableNumber).trim();
+
+            console.log(
+              `🔍 [Waiter Request] Checking table session - Restaurant: ${restaurantId}, Table: ${normalizedTableNumber}`
+            );
+
+            const qrCode = await prisma.qRCode.findFirst({
+              where: {
+                restaurantId,
+                tableNumber: normalizedTableNumber,
+                isActive: true,
+              },
+              select: {
+                id: true,
+                tableNumber: true,
+              },
+            });
+
+            if (!qrCode) {
+              console.log(
+                `❌ [Waiter Request] QR code not found for Restaurant: ${restaurantId}, Table: ${normalizedTableNumber}`
+              );
+              socket.emit("waiter_request_error", {
+                message: "Invalid table number or QR code",
+              });
+              return;
+            }
+
+            // Check if table is occupied (session is active)
+            // Use raw query to ensure we get the correct value from database
+            const occupiedResult = await prisma.$queryRaw<
+              Array<{ isOccupied: boolean }>
+            >`
+              SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+            `;
+            const isOccupied = occupiedResult[0]?.isOccupied ?? false;
+
+            console.log(
+              `🔍 [Waiter Request] Table ${normalizedTableNumber} (QR ID: ${qrCode.id}) - isOccupied: ${isOccupied}`
+            );
+
+            if (!isOccupied) {
+              socket.emit("waiter_request_error", {
+                message:
+                  "Table is not occupied. Please ask the cashier to start a session for this table.",
+              });
+              return;
+            }
+          }
+
+          // Create temporary notification object (not saved to database)
+          const notification = {
+            id: `waiter-${Date.now()}-${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            restaurantId,
+            type: "WAITER_REQUEST",
+            title:
+              orderType === "DINE_IN"
+                ? `طلب نادل من الطاولة ${tableNumber}`
+                : "طلب نادل من طلب التوصيل",
+            body:
+              orderType === "DINE_IN"
+                ? `الزبون في الطاولة ${tableNumber} يطلب النادل`
+                : "زبون التوصيل يطلب النادل",
+            isRead: false,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
 
           io.to(`restaurant_${restaurantId}`).emit("waiter_request", {
             notification,
@@ -452,13 +660,15 @@ export const setupSocketHandlers = (io: Server) => {
           });
 
           console.log(
-            `[socket-service] Waiter request from ${orderType} ${
+            `✅ [socket-service] Waiter request from ${orderType} ${
               tableNumber || "delivery"
             } to restaurant ${restaurantId}`
           );
         } catch (error) {
           console.error("[socket-service] Waiter request error:", error);
-          socket.emit("error", { message: "Failed to send waiter request" });
+          socket.emit("waiter_request_error", {
+            message: "Failed to send waiter request",
+          });
         }
       }
     );

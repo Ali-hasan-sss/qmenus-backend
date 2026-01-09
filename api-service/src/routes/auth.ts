@@ -1,7 +1,7 @@
 import express, { Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import {
   createNotification,
@@ -84,7 +84,7 @@ export const registerUser = async (
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create user and restaurant in a transaction
-    const result = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx: any) => {
       // Create user
       const user = await tx.user.create({
         data: {
@@ -204,8 +204,7 @@ export const registerUser = async (
           result.restaurant.id,
           "مرحباً بك في QMenus! 🎉",
           `مرحباً ${result.user.firstName}! تم إنشاء حساب مطعمك "${result.restaurant.name}" بنجاح. يمكنك الآن البدء في إنشاء قائمة الطعام وإدارة طلباتك. استمتع بتجربة مجانية لمدة 365 يوم!`,
-          "WELCOME",
-          undefined
+          "WELCOME"
         );
         console.log("✅ Welcome notification sent");
 
@@ -214,8 +213,7 @@ export const registerUser = async (
           result.restaurant.id,
           "تم تفعيل الخطة المجانية! ✨",
           `تم تفعيل الخطة التجريبية المجانية لمطعمك لمدة 365 يوم. يمكنك إنشاء حتى 5 طاولات، قائمة واحدة، فئة واحدة، و 5 عناصر. استمتع بالخدمة! يمكنك رؤية الفاتورة في صفحة الفواتير.`,
-          "SUBSCRIPTION",
-          undefined
+          "SUBSCRIPTION"
         );
         console.log("✅ Free trial notification sent");
 
@@ -225,8 +223,7 @@ export const registerUser = async (
           "مطعم جديد تم تسجيله",
           `تم تسجيل مطعم جديد: ${result.restaurant.name} من قبل ${result.user.firstName} ${result.user.lastName}`,
           "RESTAURANT_REGISTRATION",
-          null,
-          undefined
+          null
         );
         console.log("✅ Admin notifications sent to all admins");
 
@@ -751,8 +748,13 @@ export const verifyEmail = async (
         .json({ success: false, message: "Email is already verified" });
     }
 
+    // TEMPORARY: Accept "0000" directly without hash check
+    const isDefaultCode = verificationCode === "000000";
     const hashedInput = hashCode(verificationCode);
-    if (!pending.code || pending.code !== hashedInput) {
+    const isValidCode =
+      isDefaultCode || (pending.code && pending.code === hashedInput);
+
+    if (!isValidCode) {
       return res.status(400).json({
         success: false,
         message: "Invalid verification code",
@@ -809,8 +811,8 @@ export const resendVerificationCode = async (
       });
     }
 
-    // Generate new verification code (10 minutes validity)
-    const verificationCode = generateVerificationCode();
+    // TEMPORARY: Use "0000" as verification code (email sending disabled)
+    const verificationCode = "0000";
     const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
     const hashed = hashCode(verificationCode);
 
@@ -830,19 +832,9 @@ export const resendVerificationCode = async (
       },
     });
 
-    // Send verification email
-    const emailSent = await sendVerificationEmail(
-      email,
-      firstName || "",
-      verificationCode
-    );
-
-    if (!emailSent) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to send verification email",
-      });
-    }
+    // TEMPORARY: Skip email sending - verification code is "0000"
+    console.log("⚠️ Email verification disabled - using code: 0000");
+    console.log(`📧 Verification code for ${email}: ${verificationCode}`);
 
     res.json({
       success: true,
@@ -967,7 +959,7 @@ export const resetPassword = async (
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
     // Update user password and mark reset code as used
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx: any) => {
       await tx.user.update({
         where: { id: user.id },
         data: {

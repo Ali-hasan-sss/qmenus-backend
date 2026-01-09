@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 
 interface PlanLimits {
   maxTables: number;

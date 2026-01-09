@@ -1,0 +1,50 @@
+services:
+  # API Service - Main backend service
+  - type: web
+    name: qmenus-api
+    env: node
+    rootDirectory: .
+    plan: free
+    buildCommand: |
+      npm ci --include=dev
+      npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma
+      npx prisma@5.22.0 migrate deploy --schema ../shared/prisma/schema.prisma
+      npm run build
+      # Run seeding after migrations
+      (npx prisma@5.22.0 db seed --schema ../shared/prisma/schema.prisma || node ../shared/prisma/seed.js || echo "⚠️ Seeding skipped - may already be done")
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: PORT
+        value: "5000"
+      - key: API_PORT
+        value: "5000"
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: "7d"
+      - key: FRONTEND_URL
+        sync: false
+      - key: SOCKET_SERVICE_URL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: MAX_FILE_SIZE
+        value: "5242880"
+      - key: ALLOWED_FILE_TYPES
+        value: "image/jpeg,image/png,image/webp"

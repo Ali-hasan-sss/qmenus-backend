@@ -1,0 +1,30 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "prisma:generate": "npx prisma@5.22.0 generate --schema ./prisma/schema.prisma",
+    "prisma:migrate:dev": "dotenv -e ../.env -- npx prisma@5.22.0 migrate dev --schema ./prisma/schema.prisma",
+    "prisma:migrate:deploy": "dotenv -e ../.env -- npx prisma@5.22.0 migrate deploy --schema ./prisma/schema.prisma",
+    "prisma:migrate:reset": "dotenv -e ../.env -- npx prisma@5.22.0 migrate reset --schema ./prisma/schema.prisma",
+    "prisma:studio": "dotenv -e ../.env -- npx prisma@5.22.0 studio --schema ./prisma/schema.prisma",
+    "prisma:seed": "dotenv -e ../.env -- npx prisma@5.22.0 db seed --schema ./prisma/schema.prisma",
+    "prisma:format": "npx prisma@5.22.0 format --schema ./prisma/schema.prisma",
+    "prisma:validate": "npx prisma@5.22.0 validate --schema ./prisma/schema.prisma",
+    "prisma:migrate:resolve": "dotenv -e ../.env -- npx prisma@5.22.0 migrate resolve --applied 20260105225327_add_is_occupied_to_qrcode --schema ./prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.10.0",
+    "dotenv-cli": "^7.4.4",
+    "prisma": "^5.22.0"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  }
+}

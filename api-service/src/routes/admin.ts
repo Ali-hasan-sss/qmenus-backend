@@ -1,5 +1,6 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
+import { env } from "../../../shared/config/env";
 import * as bcrypt from "bcryptjs";
 import { authenticate, AuthRequest, authorize } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
@@ -115,6 +116,13 @@ export const createPlan = async (
       features,
     } = req.body;
 
+    const {
+      maxCategories,
+      maxItems,
+      canCustomizeTheme,
+      isFree,
+    } = req.body;
+
     const plan = await prisma.plan.create({
       data: {
         name,
@@ -127,6 +135,10 @@ export const createPlan = async (
         duration,
         maxTables,
         maxMenus,
+        maxCategories: maxCategories || 1,
+        maxItems: maxItems || 5,
+        canCustomizeTheme: canCustomizeTheme || false,
+        isFree: isFree || false,
         features: features || [],
         creatorId: req.user!.id,
       },
@@ -861,7 +873,7 @@ router.delete("/users/:id", async (req: AuthRequest, res): Promise<any> => {
       );
 
       // Get all restaurant IDs owned by this user
-      const restaurantIds = user.restaurants.map((r) => r.id);
+      const restaurantIds = user.restaurants.map((r: { id: string }) => r.id);
 
       // Delete all subscriptions for these restaurants first
       const deletedSubscriptions = await prisma.subscription.deleteMany({
@@ -964,10 +976,12 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
       price,
       duration,
       maxTables,
+      maxMenus,
       maxCategories,
       maxItems,
       canCustomizeTheme,
       isFree,
+      features,
     } = req.body;
 
     const plan = await prisma.plan.update({
@@ -981,10 +995,12 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
         price,
         duration,
         maxTables,
+        maxMenus,
         maxCategories,
         maxItems,
         canCustomizeTheme,
         isFree,
+        features: features || [],
       },
     });
 
@@ -1110,8 +1126,7 @@ router.post("/subscriptions", async (req: AuthRequest, res): Promise<any> => {
       `تم إنشاء اشتراكك في الخطة ${
         subscription.plan.name
       } بنجاح. ينتهي الاشتراك في ${endDate.toLocaleDateString()}. يمكنك رؤية الفاتورة في صفحة الفواتير.`,
-      "SUBSCRIPTION_CREATED",
-      undefined
+      "SUBSCRIPTION_CREATED"
     );
 
     // Send notification to admin
@@ -1119,8 +1134,7 @@ router.post("/subscriptions", async (req: AuthRequest, res): Promise<any> => {
       "اشتراك جديد تم إنشاؤه",
       `تم إنشاء اشتراك جديد للمطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name}`,
       "SUBSCRIPTION",
-      restaurantId,
-      undefined
+      restaurantId
     );
 
     // Create activity for admin dashboard
@@ -1177,8 +1191,7 @@ router.put(
         subscription.restaurantId,
         "تم إلغاء اشتراكك",
         `تم إلغاء اشتراكك في الخطة ${subscription.plan.name}. يمكنك الاشتراك مرة أخرى في أي وقت.`,
-        "GENERAL",
-        undefined
+        "GENERAL"
       );
 
       // Send notification to admin
@@ -1186,8 +1199,7 @@ router.put(
         "اشتراك تم إلغاؤه",
         `تم إلغاء اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name}`,
         "CANCELLATION",
-        subscription.restaurantId,
-        undefined
+        subscription.restaurantId
       );
 
       res.json({
@@ -1260,8 +1272,7 @@ router.put(
         `تم تجديد اشتراكك في الخطة ${subscription.plan.name} بنجاح. تم إضافة ${
           subscription.plan.duration
         } يوم إضافي. ينتهي الاشتراك الجديد في ${newEndDate.toLocaleDateString()}. يمكنك رؤية الفاتورة في صفحة الفواتير.`,
-        "SUBSCRIPTION_RENEWED",
-        undefined
+        "SUBSCRIPTION_RENEWED"
       );
 
       res.json({
@@ -1358,8 +1369,7 @@ router.put(
         `تم ترقية اشتراكك من ${subscription.plan.name} إلى ${
           newPlan.name
         }. تم إلغاء الاشتراك السابق وإنشاء اشتراك جديد يبدأ من اليوم وينتهي في ${newEndDate.toLocaleDateString()}. يمكنك رؤية الفاتورة في صفحة الفواتير.`,
-        "SUBSCRIPTION_UPGRADED",
-        undefined
+        "SUBSCRIPTION_UPGRADED"
       );
 
       res.json({
@@ -1376,171 +1386,8 @@ router.put(
   }
 );
 
-// Check expiring subscriptions and send reminders
-router.post(
-  "/subscriptions/check-expiring",
-  async (req: AuthRequest, res): Promise<any> => {
-    try {
-      const threeDaysFromNow = new Date();
-      threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
-
-      const expiringSubscriptions = await prisma.subscription.findMany({
-        where: {
-          status: "ACTIVE",
-          endDate: {
-            lte: threeDaysFromNow,
-            gte: new Date(), // Not expired yet
-          },
-        },
-        include: {
-          restaurant: true,
-          plan: true,
-        },
-      });
-
-      let notificationsSent = 0;
-
-      for (const subscription of expiringSubscriptions) {
-        const daysLeft = Math.ceil(
-          (new Date(subscription.endDate!).getTime() - new Date().getTime()) /
-            (1000 * 60 * 60 * 24)
-        );
-
-        // Check if we already sent a notification for this subscription
-        const existingNotification = await prisma.notification.findFirst({
-          where: {
-            restaurantId: subscription.restaurantId,
-            title: "تذكير: اشتراكك سينتهي قريباً",
-            createdAt: {
-              gte: new Date(new Date().setHours(0, 0, 0, 0)), // Today
-            },
-          },
-        });
-
-        if (!existingNotification) {
-          // Send notification to restaurant owner
-          await createNotification(
-            subscription.restaurantId,
-            "تذكير: اشتراكك سينتهي قريباً",
-            `اشتراكك في الخطة ${
-              subscription.plan.name
-            } سينتهي خلال ${daysLeft} ${
-              daysLeft === 1 ? "يوم" : "أيام"
-            }. يرجى تجديد اشتراكك لتجنب انقطاع الخدمة.`,
-            "GENERAL",
-            undefined
-          );
-
-          // Send notification to admin
-          await createAdminNotification(
-            "اشتراك سينتهي قريباً",
-            `اشتراك المطعم ${subscription.restaurant.name} في الخطة ${
-              subscription.plan.name
-            } سينتهي خلال ${daysLeft} ${daysLeft === 1 ? "يوم" : "أيام"}`,
-            "SUBSCRIPTION_EXPIRING",
-            subscription.restaurantId,
-            undefined
-          );
-
-          notificationsSent++;
-        }
-      }
-
-      res.json({
-        success: true,
-        data: {
-          expiringSubscriptions: expiringSubscriptions.length,
-          notificationsSent,
-        },
-      });
-    } catch (error) {
-      console.error("Check expiring subscriptions error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-);
-
-// Check and mark expired subscriptions
-router.post(
-  "/subscriptions/check-expired",
-  async (req: AuthRequest, res): Promise<any> => {
-    try {
-      const now = new Date();
-
-      const expiredSubscriptions = await prisma.subscription.findMany({
-        where: {
-          status: "ACTIVE",
-          endDate: {
-            lt: now,
-          },
-        },
-        include: {
-          restaurant: true,
-          plan: true,
-        },
-      });
-
-      let updatedCount = 0;
-
-      for (const subscription of expiredSubscriptions) {
-        // Update subscription status to EXPIRED
-        await prisma.subscription.update({
-          where: { id: subscription.id },
-          data: { status: "EXPIRED" },
-        });
-
-        // Send notification to restaurant owner
-        await createNotification(
-          subscription.restaurantId,
-          "انتهى اشتراكك",
-          `انتهى اشتراكك في الخطة ${subscription.plan.name}. يرجى تجديد اشتراكك لاستمرار استخدام الخدمة.`,
-          "GENERAL",
-          undefined
-        );
-
-        // Send notification to admin
-        await createAdminNotification(
-          "اشتراك انتهى",
-          `انتهى اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name}`,
-          "SUBSCRIPTION_EXPIRED",
-          subscription.restaurantId,
-          undefined
-        );
-
-        // Create activity for admin dashboard
-        await createActivity(
-          "subscription_expired",
-          `انتهى اشتراك المطعم ${subscription.restaurant.name} في الخطة ${subscription.plan.name}`,
-          {
-            restaurantName: subscription.restaurant.name,
-            planName: subscription.plan.name,
-            subscriptionId: subscription.id,
-            restaurantId: subscription.restaurantId,
-          }
-        );
-
-        updatedCount++;
-      }
-
-      res.json({
-        success: true,
-        data: {
-          expiredSubscriptions: expiredSubscriptions.length,
-          updatedCount,
-        },
-      });
-    } catch (error) {
-      console.error("Check expired subscriptions error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-);
+// NOTE: Subscription checks are now handled automatically by jobs-service
+// These endpoints have been removed as they are no longer needed
 
 // Get all invoices (Admin only)
 router.get("/invoices", async (req: AuthRequest, res): Promise<any> => {
@@ -1829,7 +1676,7 @@ router.post(
           where: { isActive: true },
           select: { id: true },
         });
-        targetRestaurants = restaurants.map((r) => r.id);
+        targetRestaurants = restaurants.map((r: { id: string }) => r.id);
       } else if (sendTo === "SELECTED") {
         targetRestaurants = restaurantIds;
       }
@@ -1848,13 +1695,31 @@ router.post(
         )
       );
 
-      // Note: Real-time notifications will be handled by socket-service
-      // notifications.forEach((notification) => {
-      //   io.to(`restaurant_${notification.restaurantId}`).emit(
-      //     "new_notification",
-      //     notification
-      //   );
-      // });
+      // Send real-time notifications via socket-service
+      try {
+        const axios = require("axios");
+        const socketServiceUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
+
+        // Send each notification to its restaurant via socket
+        for (const notification of notifications) {
+          await axios.post(`${socketServiceUrl}/api/emit-notification`, {
+            notification,
+            restaurantIds: [notification.restaurantId],
+          });
+        }
+
+        console.log(
+          `✅ Sent ${notifications.length} real-time notifications via socket`
+        );
+      } catch (socketError: any) {
+        console.error(
+          "⚠️ Socket notification error:",
+          socketError?.message || socketError
+        );
+        // Continue anyway - notifications are saved in DB
+      }
 
       res.json({
         success: true,
@@ -2258,15 +2123,13 @@ router.post(
           createdRestaurant.id,
           `مرحباً بك في منصة قوائمي! تم إنشاء حسابك بنجاح.`,
           `مرحباً بك في منصة قوائمي! تم إنشاء حسابك بنجاح.`,
-          "WELCOME",
-          undefined
+          "WELCOME"
         );
         await createNotification(
           createdRestaurant.id,
           `تم تفعيل الخطة المجانية لمطعمك. استمتع بخدماتنا!`,
           `تم تفعيل الخطة المجانية لمطعمك. استمتع بخدماتنا! يمكنك رؤية الفاتورة في صفحة الفواتير.`,
-          "SUBSCRIPTION",
-          undefined
+          "SUBSCRIPTION"
         );
 
         // Notify admin
@@ -2274,8 +2137,7 @@ router.post(
           `تم تسجيل مطعم جديد: ${restaurant.name} من قبل ${firstName} ${lastName}`,
           `تم تسجيل مطعم جديد: ${restaurant.name} من قبل ${firstName} ${lastName}`,
           "RESTAURANT_REGISTRATION",
-          "",
-          undefined
+          ""
         );
 
         // Fetch the updated user with restaurant and subscription data

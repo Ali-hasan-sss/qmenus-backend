@@ -1,5 +1,5 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
+import prisma from "../../../shared/config/db";
 import {
   authenticate,
   AuthRequest,
@@ -26,6 +26,12 @@ router.get(
   async (req: AuthRequest, res): Promise<any> => {
     try {
       const restaurantId = req.user!.restaurantId!;
+
+      // Get restaurant to include currency
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { currency: true } as any,
+      });
 
       // Get or create the single menu for this restaurant
       let menu = await prisma.menu.findFirst({
@@ -79,7 +85,10 @@ router.get(
 
       res.json({
         success: true,
-        data: { menu },
+        data: {
+          menu,
+          currency: restaurant?.currency || "USD",
+        },
       });
     } catch (error) {
       console.error("Get menu error:", error);
@@ -119,7 +128,7 @@ router.delete(
       }
 
       // Delete category and its items in a transaction
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: any) => {
         await tx.menuItem.deleteMany({ where: { categoryId: id } });
         await tx.category.delete({ where: { id } });
       });
@@ -369,12 +378,12 @@ router.post(
         description,
         descriptionAr,
         price,
-        currency,
         image,
         sortOrder,
         extras,
         categoryId,
         discount,
+        kitchenSectionId,
       } = req.body;
       const restaurantId = req.user!.restaurantId!;
 
@@ -393,6 +402,23 @@ router.post(
         });
       }
 
+      // Verify kitchen section belongs to restaurant if provided
+      if (kitchenSectionId) {
+        const kitchenSection = await prisma.kitchenSection.findFirst({
+          where: {
+            id: kitchenSectionId,
+            restaurantId,
+          },
+        });
+
+        if (!kitchenSection) {
+          return res.status(404).json({
+            success: false,
+            message: "Kitchen section not found",
+          });
+        }
+      }
+
       const menuItem = await prisma.menuItem.create({
         data: {
           name,
@@ -400,13 +426,13 @@ router.post(
           description,
           descriptionAr,
           price,
-          currency: currency || "USD",
           image,
           sortOrder: sortOrder || 0,
           extras: extras ? JSON.parse(extras) : null,
           categoryId,
           restaurantId,
           discount: discount || 0,
+          kitchenSectionId: kitchenSectionId || null,
         },
       });
 
@@ -455,6 +481,12 @@ router.get(
         });
       }
 
+      // Get restaurant currency
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { currency: true } as any,
+      });
+
       // Get items for this category
       const items = await prisma.menuItem.findMany({
         where: {
@@ -479,6 +511,7 @@ router.get(
         data: {
           category,
           items,
+          currency: restaurant?.currency || "USD",
         },
       });
     } catch (error) {
@@ -511,6 +544,12 @@ router.get(
         whereClause.categoryId = categoryId;
       }
 
+      // Get restaurant currency
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { currency: true } as any,
+      });
+
       const items = await prisma.menuItem.findMany({
         where: whereClause,
         orderBy: { sortOrder: "asc" },
@@ -526,7 +565,10 @@ router.get(
 
       res.json({
         success: true,
-        data: { items },
+        data: {
+          items,
+          currency: restaurant?.currency || "USD",
+        },
       });
     } catch (error) {
       console.error("Get menu items error:", error);
@@ -604,12 +646,12 @@ router.put(
         description,
         descriptionAr,
         price,
-        currency,
         image,
         sortOrder,
         extras,
         categoryId,
         discount,
+        kitchenSectionId,
       } = req.body;
       const restaurantId = req.user!.restaurantId!;
 
@@ -629,6 +671,23 @@ router.put(
         });
       }
 
+      // Verify kitchen section belongs to restaurant if provided
+      if (kitchenSectionId) {
+        const kitchenSection = await prisma.kitchenSection.findFirst({
+          where: {
+            id: kitchenSectionId,
+            restaurantId,
+          },
+        });
+
+        if (!kitchenSection) {
+          return res.status(404).json({
+            success: false,
+            message: "Kitchen section not found",
+          });
+        }
+      }
+
       const updatedMenuItem = await prisma.menuItem.update({
         where: { id },
         data: {
@@ -637,12 +696,12 @@ router.put(
           description,
           descriptionAr,
           price,
-          currency,
           image,
           sortOrder,
           extras: extras ? JSON.parse(extras) : null,
           categoryId,
           discount: discount || 0,
+          kitchenSectionId: kitchenSectionId || null,
         },
       });
 

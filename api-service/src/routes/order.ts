@@ -1,6 +1,7 @@
 import express, { Response } from "express";
-import prisma from "../../shared/config/db";
-import { env } from "../../shared/config/env";
+import prisma from "../../../shared/config/db";
+import { Prisma } from "@prisma/client";
+import { env } from "../../../shared/config/env";
 import {
   authenticate,
   AuthRequest,
@@ -46,6 +47,51 @@ const getExtrasNamesForNotes = (
     }
   });
   return extrasNames;
+};
+
+// Helper function to calculate taxes
+const calculateTaxes = async (
+  restaurantId: string,
+  subtotal: number
+): Promise<{ taxes: any[]; totalTaxAmount: number }> => {
+  try {
+    const settings = await prisma.restaurantSettings.findUnique({
+      where: { restaurantId },
+    });
+
+    if (!settings || !settings.taxes) {
+      return { taxes: [], totalTaxAmount: 0 };
+    }
+
+    const taxesConfig = settings.taxes as any;
+    if (!Array.isArray(taxesConfig) || taxesConfig.length === 0) {
+      return { taxes: [], totalTaxAmount: 0 };
+    }
+
+    const calculatedTaxes: any[] = [];
+    let totalTaxAmount = 0;
+
+    for (const tax of taxesConfig) {
+      if (tax && tax.name && tax.percentage !== undefined) {
+        const taxAmount = (subtotal * tax.percentage) / 100;
+        calculatedTaxes.push({
+          name: tax.name,
+          nameAr: tax.nameAr || tax.name,
+          percentage: tax.percentage,
+          amount: Number(taxAmount.toFixed(2)),
+        });
+        totalTaxAmount += taxAmount;
+      }
+    }
+
+    return {
+      taxes: calculatedTaxes,
+      totalTaxAmount: Number(totalTaxAmount.toFixed(2)),
+    };
+  } catch (error) {
+    console.error("Error calculating taxes:", error);
+    return { taxes: [], totalTaxAmount: 0 };
+  }
 };
 
 const router = express.Router();
@@ -108,19 +154,71 @@ router.post(
       // Verify QR code exists and is active (only for dine-in orders)
       let qrCode = null;
       if (orderType === "DINE_IN") {
-        qrCode = await prisma.qRCode.findFirst({
-          where: {
-            restaurantId,
-            tableNumber,
-            isActive: true,
-          },
-        });
+        // Normalize tableNumber to string to ensure consistent matching
+        const normalizedTableNumber = String(tableNumber).trim();
 
-        if (!qrCode) {
-          return res.status(404).json({
-            success: false,
-            message: "Invalid table number or QR code",
+        // Special table number for quick orders - skip QR code validation
+        const QUICK_ORDER_TABLE_NUMBER = "QUICK";
+
+        if (normalizedTableNumber === QUICK_ORDER_TABLE_NUMBER) {
+          console.log(
+            `⚡ [Order API] Quick order detected - skipping QR code validation for table: ${normalizedTableNumber}`
+          );
+          // Skip QR code validation for quick orders
+          qrCode = null;
+        } else {
+          console.log(
+            `🔍 [Order API] Looking for QR code - Restaurant: ${restaurantId}, Table: ${normalizedTableNumber} (type: ${typeof tableNumber})`
+          );
+
+          qrCode = await prisma.qRCode.findFirst({
+            where: {
+              restaurantId,
+              tableNumber: normalizedTableNumber,
+              isActive: true,
+            },
+            select: {
+              id: true,
+              tableNumber: true,
+              isOccupied: true,
+            },
           });
+
+          if (!qrCode) {
+            console.log(
+              `❌ [Order API] QR code not found for Restaurant: ${restaurantId}, Table: ${normalizedTableNumber}`
+            );
+            return res.status(404).json({
+              success: false,
+              message: "Invalid table number or QR code",
+            });
+          }
+
+          console.log(
+            `🔍 [Order API] Found QR Code - Table: ${qrCode.tableNumber}, QR ID: ${qrCode.id}, Prisma isOccupied: ${qrCode.isOccupied}`
+          );
+
+          // Check if table is occupied (session is active)
+          // Use raw query to ensure we get the correct value from database
+          const occupiedResult = await prisma.$queryRaw<
+            Array<{ isOccupied: boolean }>
+          >`
+            SELECT "isOccupied" FROM qr_codes WHERE id = ${qrCode.id}
+          `;
+          const isOccupied = occupiedResult[0]?.isOccupied ?? false;
+
+          console.log(
+            `🔍 [Order API] Table ${normalizedTableNumber} (QR ID: ${qrCode.id}) - Raw query isOccupied: ${isOccupied}, Raw result:`,
+            occupiedResult
+          );
+
+          if (!isOccupied) {
+            return res.status(403).json({
+              success: false,
+              message:
+                "Table is not occupied. Please ask the cashier to start a session for this table.",
+            });
+          }
         }
       }
 
@@ -145,7 +243,6 @@ router.post(
             name: true,
             nameAr: true,
             price: true,
-            currency: true,
             discount: true,
             extras: true,
           },
@@ -213,18 +310,20 @@ router.post(
           price: itemPrice + extrasPrice, // Store the final price per item
           notes: finalNotes,
           extras: item.extras,
+          kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
         });
       }
 
-      // Get currency from first menu item
-      const firstMenuItem = await prisma.menuItem.findFirst({
-        where: {
-          id: items[0].menuItemId,
-        },
-        select: {
-          currency: true,
-        },
-      });
+      // Get currency from restaurant
+      const restaurantCurrency = restaurant.currency || "USD";
+
+      // Calculate taxes
+      const subtotal = totalPrice;
+      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
+        restaurantId,
+        subtotal
+      );
+      const finalTotal = subtotal + totalTaxAmount;
 
       // Create order with items
       const order = await prisma.order.create({
@@ -233,8 +332,10 @@ router.post(
           orderType,
           qrCodeId: qrCode?.id,
           tableNumber: orderType === "DINE_IN" ? tableNumber : null,
-          totalPrice,
-          currency: firstMenuItem?.currency || "USD", // Use item currency
+          subtotal,
+          taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
+          totalPrice: finalTotal,
+          currency: restaurantCurrency, // Use restaurant currency
           customerName,
           customerPhone,
           customerAddress,
@@ -253,7 +354,6 @@ router.post(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {
@@ -290,30 +390,12 @@ router.post(
         },
       });
 
-      // Emit real-time update to restaurant
-      const orderMessage =
-        orderType === "DINE_IN"
-          ? `New dine-in order received for table ${tableNumber}`
-          : `New delivery order received from ${customerName}`;
-
-      // Socket.io will be handled by socket-service
-      // // Socket.io will be handled by socket-service
-      // io.to(`restaurant_${restaurantId}`).emit("new_order", {
-      //   order,
-      //   message: orderMessage,
-      // });
-
-      // Socket.io will be handled by socket-service
-      // // Socket.io will be handled by socket-service
-      // io.to(`restaurant_${restaurantId}`).emit(
-      //   "new_notification",
-      //   notification
-      // );
-
       // Notify socket-service via HTTP for real-time broadcast
       try {
         const axios = require("axios");
-        const baseUrl = env.SOCKET_SERVICE_URL || `http://localhost:${env.SOCKET_PORT || "5001"}`;
+        const baseUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
         await axios.post(`${baseUrl}/api/emit-order-update`, {
           order,
           updatedBy: "customer",
@@ -321,6 +403,22 @@ router.post(
           restaurantId,
           qrCodeId: order.qrCodeId,
         });
+
+        // Also emit KDS update with source "customer" to trigger visual/audio effects
+        console.log(
+          `📤 Sending KDS update with source: customer for new order ${order.id}`
+        );
+        await axios.post(`${baseUrl}/api/emit-kds-update`, {
+          orderItem: {
+            id: "new-order",
+            order: order,
+          },
+          restaurantId: restaurantId,
+          timestamp: new Date().toISOString(),
+          source: "customer", // Indicate this is from customer creating new order
+          orderId: order.id,
+        });
+        console.log(`✅ KDS update sent with source: customer for new order`);
       } catch (socketError: any) {
         console.error(
           "⚠️ Socket notification error (create):",
@@ -385,7 +483,6 @@ router.get("/incomplete/:restaurantId", async (req, res): Promise<any> => {
                 name: true,
                 nameAr: true,
                 price: true,
-                currency: true,
                 discount: true,
                 extras: true,
               },
@@ -445,7 +542,6 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
                 name: true,
                 nameAr: true,
                 price: true,
-                currency: true,
                 discount: true,
                 extras: true,
               },
@@ -462,6 +558,49 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
       });
     }
 
+    // Calculate subtotal and taxes if not present (for old orders)
+    let orderSubtotal: number | Prisma.Decimal = order.subtotal
+      ? Number(order.subtotal)
+      : 0;
+    let orderTaxes = order.taxes;
+    let orderTotalPrice: number | Prisma.Decimal = order.totalPrice
+      ? Number(order.totalPrice)
+      : 0;
+
+    if (!order.subtotal || !order.taxes) {
+      // Calculate subtotal from items
+      const itemsSubtotal = order.items.reduce((sum: number, item: any) => {
+        return sum + Number(item.price) * item.quantity;
+      }, 0);
+
+      orderSubtotal = itemsSubtotal;
+
+      // Calculate taxes
+      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
+        order.restaurantId,
+        itemsSubtotal
+      );
+
+      orderTaxes = calculatedTaxes.length > 0 ? calculatedTaxes : null;
+      orderTotalPrice = itemsSubtotal + totalTaxAmount;
+
+      // Update order in database if subtotal or taxes are missing
+      if (!order.subtotal || !order.taxes) {
+        await prisma.order.update({
+          where: { id: order.id },
+          data: {
+            subtotal: new Prisma.Decimal(orderSubtotal),
+            taxes: orderTaxes || undefined,
+            totalPrice: new Prisma.Decimal(orderTotalPrice),
+          },
+        });
+      }
+    } else {
+      // Convert Decimal to number for response
+      orderSubtotal = Number(orderSubtotal);
+      orderTotalPrice = Number(orderTotalPrice);
+    }
+
     res.json({
       success: true,
       data: {
@@ -471,15 +610,21 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
           tableNumber: order.tableNumber,
           qrCodeId: order.qrCodeId, // Add qrCodeId for socket room joining
           status: order.status,
-          totalPrice: order.totalPrice,
-          currency: order.currency,
+          subtotal: orderSubtotal,
+          taxes: orderTaxes,
+          totalPrice: orderTotalPrice,
+          currency:
+            (order.restaurant as any)?.currency || order.currency || "USD",
           customerName: order.customerName,
           customerPhone: order.customerPhone,
           customerAddress: order.customerAddress,
           notes: order.notes,
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
-          restaurant: order.restaurant,
+          restaurant: {
+            ...order.restaurant,
+            currency: (order.restaurant as any)?.currency || "USD",
+          },
           items: order.items,
         },
       },
@@ -544,7 +689,6 @@ router.get(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {
@@ -612,7 +756,6 @@ router.get(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {
@@ -687,16 +830,29 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       qrCodeData: order.qrCode,
     });
 
-    // Check if order can be modified (not completed)
-    if (order.status === "COMPLETED") {
+    // Check if order can be modified (not cancelled)
+    if (order.status === "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Cannot modify completed orders",
+        message: "Cannot modify cancelled orders",
       });
     }
 
+    // Security: Only allow adding items if order ID is provided in the request
+    // The order ID should only be known to the customer who created the order
+    // This is handled on the frontend by only showing the menu when orderId is in the URL
+
+    // If order is COMPLETED or READY, change status to PREPARING when adding new items
+    const shouldChangeStatusToPreparing =
+      order.status === "COMPLETED" || order.status === "READY";
+    if (shouldChangeStatusToPreparing) {
+      console.log(
+        `🔄 Order ${id} is ${order.status}, will change to PREPARING when adding items`
+      );
+    }
+
     // Validate and calculate new items
-    let totalPrice = Number(order.totalPrice);
+    let currentSubtotal = Number(order.subtotal || order.totalPrice);
     const orderItems = [];
 
     for (const item of items) {
@@ -716,7 +872,6 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
           name: true,
           nameAr: true,
           price: true,
-          currency: true,
           discount: true,
           extras: true,
         },
@@ -761,7 +916,7 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
 
       // Total price including extras
       const itemTotal = (itemPrice + extrasPrice) * item.quantity;
-      totalPrice += itemTotal;
+      currentSubtotal += itemTotal;
 
       // Add extras details to notes
       let finalNotes = item.notes || "";
@@ -783,6 +938,7 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
         price: itemPrice + extrasPrice, // Store the final price per item
         notes: finalNotes,
         extras: item.extras,
+        kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
       });
     }
 
@@ -791,10 +947,31 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       data: orderItems,
     });
 
-    // Update order total price
+    // Recalculate taxes with new subtotal
+    const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
+      order.restaurantId,
+      currentSubtotal
+    );
+    const finalTotal = currentSubtotal + totalTaxAmount;
+
+    // Update order with new subtotal, taxes, and total
+    // If order was COMPLETED, change status to PREPARING
+    const updateData: any = {
+      subtotal: currentSubtotal,
+      taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
+      totalPrice: finalTotal,
+    };
+
+    if (shouldChangeStatusToPreparing) {
+      updateData.status = "PREPARING";
+      console.log(
+        `🔄 Order ${id} status will change from ${order.status} to PREPARING (new items added)`
+      );
+    }
+
     const updatedOrder = await prisma.order.update({
       where: { id },
-      data: { totalPrice },
+      data: updateData,
       include: {
         items: {
           include: {
@@ -804,7 +981,6 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
                 name: true,
                 nameAr: true,
                 price: true,
-                currency: true,
                 discount: true,
                 extras: true,
               },
@@ -815,10 +991,19 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       },
     });
 
+    // Log status change if it occurred
+    if (shouldChangeStatusToPreparing) {
+      console.log(
+        `✅ Order ${id} status successfully changed to: ${updatedOrder.status}`
+      );
+    }
+
     // Emit socket event for real-time updates via HTTP request to socket service
     try {
       const axios = require("axios");
-      const socketServiceUrl = env.SOCKET_SERVICE_URL || `http://localhost:${env.SOCKET_PORT || "5001"}`;
+      const socketServiceUrl =
+        env.SOCKET_SERVICE_URL ||
+        `http://localhost:${env.SOCKET_PORT || "5001"}`;
 
       console.log(
         `🔔 Sending order update to socket service at ${socketServiceUrl}`
@@ -839,6 +1024,23 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
         tableNumber: order.tableNumber,
         qrCodeId: qrCodeId,
       });
+
+      // Also emit KDS update with source "customer" to trigger visual/audio effects
+      // Include order information so frontend can show effects
+      console.log(
+        `📤 Sending KDS update with source: customer for order ${updatedOrder.id}`
+      );
+      await axios.post(`${socketServiceUrl}/api/emit-kds-update`, {
+        orderItem: {
+          id: "new-items",
+          order: updatedOrder,
+        },
+        restaurantId: order.restaurantId,
+        timestamp: new Date().toISOString(),
+        source: "customer", // Indicate this is from customer adding items
+        orderId: updatedOrder.id,
+      });
+      console.log(`✅ KDS update sent with source: customer`);
 
       console.log("✅ Socket event emitted for order update");
     } catch (socketError: any) {
@@ -907,7 +1109,8 @@ router.post(
 
       // Calculate new total
       const itemTotal = Number(price) * Number(quantity);
-      const newTotalPrice = Number(order.totalPrice) + itemTotal;
+      const currentSubtotal =
+        Number(order.subtotal || order.totalPrice) + itemTotal;
 
       // Add custom item directly to order (WITHOUT creating a menu item)
       await prisma.orderItem.create({
@@ -920,13 +1123,25 @@ router.post(
           customItemName: name,
           customItemNameAr: name, // Use same name for both languages
           menuItemId: null, // No menu item for custom items
+          kitchenItemStatus: "PENDING" as any, // Custom items also start as PENDING - TODO: Use enum after regenerating Prisma Client
         },
       });
 
-      // Update order total price
+      // Recalculate taxes with new subtotal
+      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
+        restaurantId,
+        currentSubtotal
+      );
+      const finalTotal = currentSubtotal + totalTaxAmount;
+
+      // Update order with new subtotal, taxes, and total
       const updatedOrder = await prisma.order.update({
         where: { id },
-        data: { totalPrice: newTotalPrice },
+        data: {
+          subtotal: currentSubtotal,
+          taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
+          totalPrice: finalTotal,
+        },
         include: {
           items: {
             include: {
@@ -936,7 +1151,6 @@ router.post(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {
@@ -960,29 +1174,6 @@ router.post(
           },
         },
       });
-
-      // Socket.io will be handled by socket-service
-      // io.to(`restaurant_${restaurantId}`).emit("order_updated", {
-      //   order: updatedOrder,
-      //   message: `Item added to order #${id.slice(-8)}`,
-      // });
-
-      // Emit to customer if they're viewing the order
-      if (updatedOrder.qrCodeId) {
-        // Socket.io will be handled by socket-service
-        // io.to(`table_${updatedOrder.qrCodeId}`).emit("order_status_update", {
-        //   order: updatedOrder,
-        //   message: "Your order has been updated",
-        // });
-      }
-
-      // Also emit to all customers in restaurant room
-      // Socket.io will be handled by socket-service
-
-      // io.to(`restaurant_${restaurantId}`).emit("order_status_update", {
-      //   order: updatedOrder,
-      //   message: "Your order has been updated",
-      // });
 
       res.json({
         success: true,
@@ -1040,7 +1231,6 @@ router.put(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {
@@ -1065,47 +1255,43 @@ router.put(
         },
       });
 
-      // Emit real-time update to restaurant dashboard
-      // Socket.io will be handled by socket-service
-
-      // io.to(`restaurant_${restaurantId}`).emit("order_updated", {
-      //   order: updatedOrder,
-      //   message: `Order status updated to ${status}`,
-      //   updatedBy: "restaurant", // Flag to indicate restaurant updated this
-      // });
-
-      // Emit to specific table if possible (for dine-in orders)
-      if (updatedOrder.qrCodeId) {
-        // Socket.io will be handled by socket-service
-        // io.to(`table_${updatedOrder.qrCodeId}`).emit("order_status_update", {
-        //   order: updatedOrder,
-        //   message: `Your order status is now ${status}`,
-        // });
-      }
-
-      // Emit to all customers in restaurant room (for delivery orders and general updates)
-      console.log(
-        `Emitting order_status_update to restaurant_${restaurantId} for order ${id}`
-      );
-      // Socket.io will be handled by socket-service
-
-      // io.to(`restaurant_${restaurantId}`).emit("order_status_update", {
-      //   order: updatedOrder,
-      //   message: `Your order status is now ${status}`,
-      //   updatedBy: "restaurant", // Flag to indicate restaurant updated this
-      // });
-
       // Notify socket-service via HTTP for real-time broadcast
+      // Don't send order_update for COMPLETED or CANCELLED orders to avoid notifications at cashier
+      // Only send updates for status changes that are not final states
       try {
         const axios = require("axios");
-        const baseUrl = env.SOCKET_SERVICE_URL || `http://localhost:${env.SOCKET_PORT || "5001"}`;
-        await axios.post(`${baseUrl}/api/emit-order-update`, {
-          order: updatedOrder,
-          updatedBy: "restaurant",
-          timestamp: new Date().toISOString(),
-          restaurantId: restaurantId,
-          qrCodeId: updatedOrder.qrCodeId,
-        });
+        const baseUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
+
+        // Only send order_update if status is not COMPLETED or CANCELLED
+        // This prevents notifications at cashier when order is completed
+        if (status !== "CANCELLED" && status !== "COMPLETED") {
+          await axios.post(`${baseUrl}/api/emit-order-update`, {
+            order: updatedOrder,
+            updatedBy: "restaurant",
+            timestamp: new Date().toISOString(),
+            restaurantId: restaurantId,
+            qrCodeId: updatedOrder.qrCodeId,
+          });
+        }
+
+        // If order is cancelled or completed, notify KDS to remove items from display
+        if (status === "CANCELLED" || status === "COMPLETED") {
+          await axios.post(`${baseUrl}/api/emit-kds-update`, {
+            orderItem: null, // Signal to refresh all items
+            restaurantId,
+            timestamp: new Date().toISOString(),
+            source: "kitchen", // No visual/audio effects for kitchen updates
+            orderId: id, // Include order ID to help with refresh
+          });
+          console.log(
+            `✅ Order ${id} ${status}, KDS update sent to remove items from display`
+          );
+          console.log(
+            `🔇 Order ${id} ${status}, skipping order_update to prevent cashier notifications`
+          );
+        }
       } catch (socketError: any) {
         console.error(
           "⚠️ Socket notification error (status):",
@@ -1273,7 +1459,6 @@ router.get(
                   name: true,
                   nameAr: true,
                   price: true,
-                  currency: true,
                   discount: true,
                   extras: true,
                   category: {

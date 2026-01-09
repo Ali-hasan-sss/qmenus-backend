@@ -5,7 +5,7 @@
   "main": "dist/api-service/src/app.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
-    "build": "tsc -p .",
+    "build": "npx tsc -p .",
     "migrate:deploy": "cd ../shared && npm run prisma:migrate:deploy",
     "migrate:dev": "cd ../shared && npm run prisma:migrate:dev",
     "db:seed": "cd ../shared && npm run prisma:seed",

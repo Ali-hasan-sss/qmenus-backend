@@ -5,7 +5,7 @@
   "main": "dist/jobs-service/src/index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma && tsc -p .",
+    "build": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma && npx tsc -p .",
     "postinstall": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma",
     "start": "node dist/jobs-service/src/index.js"
   },

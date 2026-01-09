@@ -12,8 +12,27 @@ COPY api-service/package*.json ./api-service/
 COPY socket-service/package*.json ./socket-service/
 COPY jobs-service/package*.json ./jobs-service/
 
-# Install dependencies
+# Install root dependencies
 RUN npm ci --include=dev
+
+# Install shared dependencies
+WORKDIR /app/shared
+RUN npm ci --include=dev
+
+# Install api-service dependencies
+WORKDIR /app/api-service
+RUN npm ci --include=dev
+
+# Install socket-service dependencies
+WORKDIR /app/socket-service
+RUN npm ci --include=dev
+
+# Install jobs-service dependencies
+WORKDIR /app/jobs-service
+RUN npm ci --include=dev
+
+# Return to root
+WORKDIR /app
 
 # Generate Prisma Client
 FROM base AS prisma
@@ -26,8 +45,16 @@ RUN npx prisma@5.22.0 generate --schema ./shared/prisma/schema.prisma
 FROM base AS builder
 WORKDIR /app
 
-# Copy dependencies
+# Copy dependencies from root
 COPY --from=deps /app/node_modules ./node_modules
+
+# Copy node_modules from each service (for service-specific devDependencies like typescript)
+COPY --from=deps /app/shared/node_modules ./shared/node_modules
+COPY --from=deps /app/api-service/node_modules ./api-service/node_modules
+COPY --from=deps /app/socket-service/node_modules ./socket-service/node_modules
+COPY --from=deps /app/jobs-service/node_modules ./jobs-service/node_modules
+
+# Copy Prisma client
 COPY --from=prisma /app/node_modules/.prisma ./node_modules/.prisma
 
 # Copy source code

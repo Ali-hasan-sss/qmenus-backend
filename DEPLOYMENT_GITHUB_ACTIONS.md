@@ -4,6 +4,27 @@
 
 تم إعداد GitHub Actions workflow لنشر Backend تلقائياً إلى السيرفر عند Push إلى branch `main` أو `master`.
 
+## ⚠️ موقع ملفات GitHub Actions
+
+**ملفات GitHub Actions موجودة في `.github/workflows/` في جذر المشروع** (root repository)، وليس داخل `backend/`.
+
+```
+mymenus/                          # جذر المشروع
+├── .github/
+│   └── workflows/
+│       ├── deploy-backend.yml    # ملف workflow للنشر
+│       └── README.md
+├── backend/                      # مشروع Backend
+│   ├── docker-compose.yml
+│   ├── Dockerfile
+│   └── ...
+└── frontend/                     # مشروع Frontend
+```
+
+**هذا هو الموقع الصحيح** لأن GitHub Actions يبحث عن ملفات workflow في `.github/workflows/` في جذر المستودع فقط.
+
+Workflow محدد لـ **backend فقط** من خلال `paths: - "backend/**"` - لذا تغييرات frontend لن تطلق النشر.
+
 ## الخطوات المطلوبة
 
 ### 1. إعداد GitHub Secrets

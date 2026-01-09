@@ -1,0 +1,147 @@
+name: Deploy Backend to Server
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "backend/**"
+      # Only trigger on backend changes, ignore frontend and other directories
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+# ============================================
+# Backend Deployment Workflow
+# ============================================
+# This workflow is specifically for backend deployment only.
+# It will trigger ONLY when changes are made to backend/ directory.
+# Location: This file must be in .github/workflows/ at repository root
+# Target: Deploys only the backend service located in backend/ directory
+# ============================================
+
+jobs:
+  deploy:
+    name: Deploy Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+          SERVER_PATH: ${{ secrets.SERVER_PATH }}
+        run: |
+          sshpass -p "${SERVER_PASSWORD}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts ${SERVER_USER}@${SERVER_HOST} bash -s << EOF
+            set -e
+            
+            # SERVER_PATH should point directly to backend directory on server
+            # Example: /opt/qmenus/qmenus-backend (where docker-compose.yml is located)
+            SERVER_PATH="${SERVER_PATH:-/opt/qmenus/qmenus-backend}"
+            
+            echo "🚀 Starting Backend deployment..."
+            echo "📁 Backend path: \${SERVER_PATH}"
+            
+            # Navigate to backend directory on server
+            cd "\${SERVER_PATH}"
+            
+            # Verify we're in the correct backend directory (contains docker-compose.yml)
+            if [ ! -f "docker-compose.yml" ]; then
+              echo "❌ Error: docker-compose.yml not found in \${SERVER_PATH}"
+              echo "   Make sure SERVER_PATH points to the backend directory"
+              exit 1
+            fi
+            
+            echo "✅ Found docker-compose.yml in backend directory"
+            
+            # Pull latest changes
+            echo "📥 Pulling latest changes..."
+            git fetch origin
+            CURRENT_BRANCH=\$(git rev-parse --abbrev-ref HEAD)
+            git reset --hard origin/\${CURRENT_BRANCH} || git reset --hard origin/main || git reset --hard origin/master
+            
+            # Backup current .env file if it exists
+            if [ -f .env ]; then
+              echo "💾 Backing up .env file..."
+              cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+            fi
+            
+            # Create necessary directories
+            echo "📁 Creating directories..."
+            mkdir -p nginx/logs
+            mkdir -p api-service/logs
+            mkdir -p socket-service/logs
+            mkdir -p jobs-service/logs
+            
+            # Build and restart containers
+            echo "🔨 Building Docker images..."
+            docker-compose build --no-cache
+            
+            echo "🛑 Stopping containers..."
+            docker-compose down || true
+            
+            echo "🚀 Starting containers..."
+            docker-compose up -d
+            
+            echo "⏳ Waiting for services to be healthy..."
+            sleep 15
+            
+            # Check if containers are running
+            echo "📊 Container status:"
+            docker-compose ps
+            
+            # Health check
+            echo "🏥 Checking service health..."
+            if docker-compose ps | grep -q "Up"; then
+              echo "✅ Containers are running!"
+              
+              # Run database migrations
+              echo "🗄️  Running database migrations..."
+              docker-compose exec -T backend sh -c "cd /app/api-service && npx prisma@5.22.0 migrate deploy --schema ../shared/prisma/schema.prisma" || echo "⚠️  Migration skipped or failed"
+              
+              # Seed database if needed
+              echo "🌱 Checking database seed..."
+              docker-compose exec -T backend node /app/api-service/scripts/check-and-seed.js || echo "⚠️  Seed skipped or failed"
+              
+              echo "✅ Deployment successful!"
+            else
+              echo "❌ Deployment failed - containers are not running"
+              echo "📋 Recent logs:"
+              docker-compose logs --tail=50
+              exit 1
+            fi
+            
+            # Clean up old images (optional)
+            echo "🧹 Cleaning up old Docker images..."
+            docker image prune -f || true
+            
+            echo "✨ Deployment completed successfully!"
+            echo "📊 View logs with: docker-compose logs -f"
+          EOF
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "✅ Backend deployment completed successfully!"
+          echo "🌐 Server: ${{ secrets.SERVER_HOST }}"
+          echo "📁 Path: ${{ secrets.SERVER_PATH }}"
+
+      - name: Deployment Failed
+        if: failure()
+        run: |
+          echo "❌ Backend deployment failed!"
+          echo "Please check the logs above for details."

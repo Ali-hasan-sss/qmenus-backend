@@ -4,6 +4,8 @@ FROM node:20-alpine AS base
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app
+# Install OpenSSL for Prisma (may be needed during install)
+RUN apk add --no-cache openssl openssl-dev libc6-compat
 
 # Copy package files
 COPY package*.json ./
@@ -41,6 +43,8 @@ WORKDIR /app
 # Generate Prisma Client
 FROM base AS prisma
 WORKDIR /app
+# Install OpenSSL for Prisma generation
+RUN apk add --no-cache openssl openssl-dev libc6-compat
 COPY --from=deps /app/node_modules ./node_modules
 COPY shared/prisma ./shared/prisma
 RUN npx prisma@5.22.0 generate --schema ./shared/prisma/schema.prisma
@@ -48,6 +52,8 @@ RUN npx prisma@5.22.0 generate --schema ./shared/prisma/schema.prisma
 # Build stage
 FROM base AS builder
 WORKDIR /app
+# Install OpenSSL for Prisma during build
+RUN apk add --no-cache openssl openssl-dev libc6-compat
 
 # Copy dependencies from root
 COPY --from=deps /app/node_modules ./node_modules
@@ -82,6 +88,9 @@ FROM base AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
+
+# Install OpenSSL for Prisma (required for Prisma to work on Alpine)
+RUN apk add --no-cache openssl openssl-dev libc6-compat
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \

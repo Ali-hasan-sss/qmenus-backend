@@ -122,7 +122,12 @@ services:
       # Script will switch to nginx-certs.conf after certificates are obtained
       - ./nginx/nginx-init.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - qmenus-network
     command: '/bin/sh -c ''while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g "daemon off;"'''
@@ -135,8 +140,9 @@ services:
     volumes:
       - ./nginx/certbot/conf:/etc/letsencrypt
       - ./nginx/certbot/www:/var/www/certbot
-    # Auto-renew certificates twice daily and reload nginx after renewal
-    entrypoint: '/bin/sh -c ''trap exit TERM; while :; do certbot renew --quiet --deploy-hook "docker exec qmenus-nginx nginx -s reload"; sleep 12h & wait $${!}; done;'''
+    # Auto-renew certificates twice daily
+    # Note: nginx auto-reloads every 6h, so renewed certs will be picked up automatically
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew --quiet; sleep 12h & wait $${!}; done;'"
     networks:
       - qmenus-network
 

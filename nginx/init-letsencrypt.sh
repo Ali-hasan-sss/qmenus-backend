@@ -7,7 +7,8 @@
 set -e
 
 # Configuration
-domains=(api.qmenussy.com)
+# Add both API and Socket domains
+domains=(api.qmenussy.com socket.qmenussy.com)
 rsa_key_size=4096
 email="emonate8@gmail.com"
 staging=0 # Set to 1 for testing (avoids rate limits)
@@ -24,7 +25,7 @@ cd "$BACKEND_DIR"
 echo "=========================================="
 echo "Let's Encrypt SSL Certificate Setup"
 echo "=========================================="
-echo "Domain: ${domains[0]}"
+echo "Domains: ${domains[*]}"
 echo "Email: $email"
 echo "=========================================="
 echo
@@ -39,7 +40,7 @@ if [ ! -e "$data_path/conf/options-ssl-nginx.conf" ] || [ ! -e "$data_path/conf/
   echo
 fi
 
-# Check if certificates already exist
+# Check if certificates already exist (check first domain only for simplicity)
 if [ -d "$data_path/conf/live/${domains[0]}" ]; then
   echo "⚠️  Existing certificates found for ${domains[0]}"
   echo "   Skipping certificate generation. Use 'certbot renew' to renew."
@@ -47,28 +48,42 @@ if [ -d "$data_path/conf/live/${domains[0]}" ]; then
   exit 0
 fi
 
+# Ensure backend is running first (nginx needs it)
+echo "### Ensuring backend services are running..."
+docker compose up -d postgres redis backend
+
+echo "### Waiting for backend to be ready..."
+sleep 15
+
+# Check if backend is running
+if ! docker compose ps backend | grep -q "Up"; then
+  echo "❌ Backend service is not running"
+  echo "   Checking logs..."
+  docker compose logs backend --tail=30
+  exit 1
+fi
+
+echo "✅ Backend service is running"
+
 # Ensure nginx is using init config (allows HTTP for certbot challenge)
-# The docker-compose.yml will mount nginx-certs.conf, so we'll use init config temporarily
 echo "### Preparing nginx for certificate generation ..."
 
 # Create certbot webroot directory
 mkdir -p "$data_path/www"
 
-# Start/restart services
-echo "### Starting services ..."
+# Start nginx
+echo "### Starting nginx ..."
 docker compose up -d nginx
 
 # Wait for nginx to be ready
 echo "### Waiting for nginx to be ready ..."
 sleep 10
 
-# Test if nginx is responding
-if ! docker compose exec nginx nginx -t 2>/dev/null; then
-    echo "⚠️  Nginx configuration issue. Using init config..."
-    # Temporarily copy init config
-    cp "$NGINX_DIR/nginx-init.conf" "$NGINX_DIR/nginx-certs.conf"
-    docker compose restart nginx
-    sleep 5
+# Test if nginx config is valid
+if ! docker compose exec -T nginx nginx -t 2>/dev/null; then
+    echo "⚠️  Nginx configuration test failed, checking logs..."
+    docker compose logs nginx --tail=20
+    echo "⚠️  Continuing anyway - nginx may still work..."
 fi
 
 echo
@@ -90,10 +105,11 @@ else
   staging_arg=""
 fi
 
-echo "### Requesting Let's Encrypt certificate for ${domains[0]} ..."
+echo "### Requesting Let's Encrypt certificate for ${domains[@]} ..."
+echo "   Domains: ${domains[*]}"
 echo "   This may take a few minutes..."
 
-# Request certificate (non-interactive)
+# Request certificate (non-interactive, without --force-renewal for initial request)
 docker compose run --rm certbot certonly \
   --webroot \
   --webroot-path=/var/www/certbot \
@@ -101,8 +117,7 @@ docker compose run --rm certbot certonly \
   $email_arg \
   $domain_args \
   --rsa-key-size $rsa_key_size \
-  --non-interactive \
-  --force-renewal
+  --non-interactive
 
 if [ $? -eq 0 ]; then
   echo "✅ Certificate obtained successfully!"
@@ -141,9 +156,22 @@ if [ $? -eq 0 ]; then
   echo "✅ SSL Certificate Setup Complete!"
   echo "=========================================="
   echo "Certificate location: $data_path/conf/live/${domains[0]}"
-  echo "Your site should now be accessible at: https://${domains[0]}"
+  echo "   (Single certificate for both domains: ${domains[*]})"
+  echo ""
+  echo "Your services are now accessible at:"
+  echo "  📡 API:     https://${domains[0]}"
+  echo "  🔌 Socket:  https://${domains[1]}"
+  echo ""
+  echo "For frontend configuration (.env.local):"
+  echo "  NEXT_PUBLIC_API_URL=https://${domains[0]}"
+  echo "  NEXT_PUBLIC_SOCKET_URL=https://${domains[1]}"
   echo ""
   echo "Certificates will auto-renew via certbot service."
+  echo ""
+  echo "⚠️  IMPORTANT: Make sure to add A record for ${domains[1]}:"
+  echo "   Type: A"
+  echo "   Name: socket"
+  echo "   Value: <YOUR_SERVER_IP>"
 else
   echo "❌ Failed to obtain certificate"
   echo "   Please check the logs: docker compose logs certbot"

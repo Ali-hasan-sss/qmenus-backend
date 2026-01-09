@@ -13,23 +13,24 @@ COPY socket-service/package*.json ./socket-service/
 COPY jobs-service/package*.json ./jobs-service/
 
 # Install root dependencies
-RUN npm ci --include=dev
+# Using npm install instead of npm ci because package-lock.json may be out of sync
+RUN npm install --include=dev
 
 # Install shared dependencies
 WORKDIR /app/shared
-RUN npm ci --include=dev
+RUN npm install --include=dev
 
 # Install api-service dependencies
 WORKDIR /app/api-service
-RUN npm ci --include=dev
+RUN npm install --include=dev
 
 # Install socket-service dependencies
 WORKDIR /app/socket-service
-RUN npm ci --include=dev
+RUN npm install --include=dev
 
 # Install jobs-service dependencies
 WORKDIR /app/jobs-service
-RUN npm ci --include=dev
+RUN npm install --include=dev
 
 # Return to root
 WORKDIR /app

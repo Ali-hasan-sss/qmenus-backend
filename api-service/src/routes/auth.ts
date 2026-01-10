@@ -289,9 +289,6 @@ export const registerUser = async (
       setCookieHeader: Array.isArray(setCookieHeader)
         ? setCookieHeader[0]
         : setCookieHeader,
-      path: cookieOptions.path,
-      domain: cookieOptions.domain || "auto",
-      isProduction: isProd,
     });
 
     res.status(201).json({

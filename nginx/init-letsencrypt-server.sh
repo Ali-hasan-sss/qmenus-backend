@@ -93,18 +93,31 @@ if ! docker compose exec -T nginx nginx -t 2>/dev/null; then
     echo "⚠️  Continuing anyway - nginx may still work..."
 fi
 
-# Test HTTP challenge
-echo "### Testing HTTP challenge path ..."
-echo "test-challenge" > "$data_path/www/.well-known/acme-challenge/test.txt"
-sleep 2
-if curl -s http://api.qmenussy.com/.well-known/acme-challenge/test.txt | grep -q "test-challenge"; then
-  echo "✅ HTTP challenge path is working"
-  rm -f "$data_path/www/.well-known/acme-challenge/test.txt"
+# Ensure challenge directory exists
+echo "### Preparing challenge directory ..."
+mkdir -p "$data_path/www/.well-known/acme-challenge"
+chmod -R 755 "$data_path/www" 2>/dev/null || true
+
+# Verify directory structure
+echo "### Verifying setup ..."
+if [ -d "$data_path/www/.well-known/acme-challenge" ]; then
+  echo "✅ Challenge directory created: $data_path/www/.well-known/acme-challenge"
 else
-  echo "❌ HTTP challenge path is not accessible"
-  echo "   Please check nginx configuration and DNS"
+  echo "❌ Failed to create challenge directory"
   exit 1
 fi
+
+# Verify nginx is running
+if docker compose ps nginx | grep -q "Up"; then
+  echo "✅ Nginx is running"
+else
+  echo "❌ Nginx is not running"
+  exit 1
+fi
+
+echo "✅ Ready for certificate generation"
+echo "   Certbot will verify HTTP challenge automatically during request"
+echo
 
 echo
 

@@ -59,18 +59,38 @@ console.log("🔒 CORS configuration:", {
   credentials: true,
 });
 
+// Enhanced CORS middleware with better logging
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  console.log("🌐 CORS middleware hit:", {
+    method: req.method,
+    path: req.path,
+    origin: origin || "no origin",
+    "x-forwarded-for": req.headers["x-forwarded-for"],
+    "x-forwarded-proto": req.headers["x-forwarded-proto"],
+  });
+  next();
+});
+
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) {
+        console.log("⚠️ CORS: No origin header, allowing request");
         return callback(null, true);
       }
 
       const origins = getAllowedOrigins();
+      console.log("🔍 CORS check:", {
+        requestOrigin: origin,
+        allowedOrigins: origins,
+        isArray: Array.isArray(origins),
+      });
 
       if (origins === true) {
         // Development: allow all origins
+        console.log("✅ CORS: Development mode - allowing all origins");
         return callback(null, true);
       }
 
@@ -81,6 +101,10 @@ app.use(
 
       console.log("❌ CORS blocked for origin:", origin);
       console.log("   Allowed origins:", origins);
+      const originMatch = Array.isArray(origins)
+        ? origins.includes(origin)
+        : false;
+      console.log("   Origin match:", originMatch);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
@@ -91,6 +115,7 @@ app.use(
       "X-Requested-With",
       "Accept",
     ],
+    exposedHeaders: ["Set-Cookie"], // Explicitly expose Set-Cookie
     optionsSuccessStatus: 204,
   })
 );

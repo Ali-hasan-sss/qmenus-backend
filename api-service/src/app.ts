@@ -81,9 +81,24 @@ app.use(
         return callback(null, true);
       }
 
+      // Normalize origin by extracting only the base URL (protocol + host + port)
+      // This handles cases where the origin header incorrectly includes a path
+      let normalizedOrigin = origin;
+      try {
+        const url = new URL(origin);
+        normalizedOrigin = `${url.protocol}//${url.host}`;
+        if (normalizedOrigin !== origin) {
+          console.log(`🔄 Normalized origin: ${origin} -> ${normalizedOrigin}`);
+        }
+      } catch (e) {
+        // If URL parsing fails, use origin as-is
+        console.log(`⚠️ Failed to parse origin: ${origin}`);
+      }
+
       const origins = getAllowedOrigins();
       console.log("🔍 CORS check:", {
         requestOrigin: origin,
+        normalizedOrigin: normalizedOrigin,
         allowedOrigins: origins,
         isArray: Array.isArray(origins),
       });
@@ -94,17 +109,20 @@ app.use(
         return callback(null, true);
       }
 
-      if (Array.isArray(origins) && origins.includes(origin)) {
-        console.log("✅ CORS allowed for origin:", origin);
-        return callback(null, true);
+      // Check both the original and normalized origin
+      const isAllowed =
+        Array.isArray(origins) &&
+        (origins.includes(origin) || origins.includes(normalizedOrigin));
+
+      if (isAllowed) {
+        console.log("✅ CORS allowed for origin:", normalizedOrigin);
+        return callback(null, normalizedOrigin); // Return normalized origin
       }
 
       console.log("❌ CORS blocked for origin:", origin);
+      console.log("   Normalized origin:", normalizedOrigin);
       console.log("   Allowed origins:", origins);
-      const originMatch = Array.isArray(origins)
-        ? origins.includes(origin)
-        : false;
-      console.log("   Origin match:", originMatch);
+      console.log("   Origin match:", isAllowed);
       return callback(new Error("Not allowed by CORS"));
     },
     credentials: true,

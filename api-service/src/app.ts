@@ -41,15 +41,48 @@ const getAllowedOrigins = (): string[] | boolean => {
 
   // Use ALLOWED_ORIGINS if set, otherwise fallback to FRONTEND_URL
   if (env.ALLOWED_ORIGINS && env.ALLOWED_ORIGINS.length > 0) {
+    console.log("🌐 CORS allowed origins:", env.ALLOWED_ORIGINS);
     return env.ALLOWED_ORIGINS;
   }
 
-  return [env.FRONTEND_URL || "http://localhost:3000"];
+  const frontendUrl = env.FRONTEND_URL || "http://localhost:3000";
+  console.log("🌐 CORS using FRONTEND_URL:", frontendUrl);
+  return [frontendUrl];
 };
+
+const allowedOrigins = getAllowedOrigins();
+console.log("🔒 CORS configuration:", {
+  isProduction: isProd,
+  allowedOrigins: Array.isArray(allowedOrigins)
+    ? allowedOrigins
+    : "all origins",
+  credentials: true,
+});
 
 app.use(
   cors({
-    origin: getAllowedOrigins(),
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const origins = getAllowedOrigins();
+
+      if (origins === true) {
+        // Development: allow all origins
+        return callback(null, true);
+      }
+
+      if (Array.isArray(origins) && origins.includes(origin)) {
+        console.log("✅ CORS allowed for origin:", origin);
+        return callback(null, true);
+      }
+
+      console.log("❌ CORS blocked for origin:", origin);
+      console.log("   Allowed origins:", origins);
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [

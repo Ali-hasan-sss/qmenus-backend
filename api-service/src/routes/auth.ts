@@ -248,15 +248,21 @@ export const registerUser = async (
     // Set httpOnly cookie with proper cross-origin support
     const isProd = process.env.NODE_ENV === "production";
 
+    // Get origin from request to log it
+    const origin = req.headers.origin || req.headers.referer || "unknown";
+    console.log("🌐 Register request origin:", origin);
+
     // For cross-origin cookies (Frontend on Vercel, Backend on api.qmenussy.com)
-    // We need: secure: true, sameSite: "none"
+    // We need: secure: true, sameSite: "none", and NO domain set
     const cookieOptions: any = {
       httpOnly: true,
       secure: isProd, // MUST be true in production for sameSite: "none"
       sameSite: isProd ? "none" : "lax", // "none" allows cross-origin cookies
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
-      // Don't set domain - let browser handle it based on the request origin
+      // IMPORTANT: Don't set domain - cookie will be scoped to api.qmenussy.com
+      // Browser will send it automatically with requests to api.qmenussy.com
+      // Frontend on www.qmenussy.com must use withCredentials: true to send it
     };
 
     // In development, explicitly set domain to undefined for localhost
@@ -264,13 +270,25 @@ export const registerUser = async (
       cookieOptions.domain = undefined;
     }
 
+    // Set the cookie
     res.cookie("auth-token", token, cookieOptions);
+
+    // Get the Set-Cookie header to verify it was set correctly
+    const setCookieHeader = res.getHeader("Set-Cookie");
 
     console.log("🍪 Register cookie set:", {
       httpOnly: true,
       secure: cookieOptions.secure,
       sameSite: cookieOptions.sameSite,
       maxAge: "30 days",
+      path: cookieOptions.path,
+      domain:
+        cookieOptions.domain || "not set (will default to api.qmenussy.com)",
+      isProduction: isProd,
+      origin,
+      setCookieHeader: Array.isArray(setCookieHeader)
+        ? setCookieHeader[0]
+        : setCookieHeader,
       path: cookieOptions.path,
       domain: cookieOptions.domain || "auto",
       isProduction: isProd,
@@ -369,15 +387,21 @@ export const loginUser = async (
     // Set httpOnly cookie with proper cross-origin support
     const isProd = process.env.NODE_ENV === "production";
 
+    // Get origin from request to log it
+    const origin = req.headers.origin || req.headers.referer || "unknown";
+    console.log("🌐 Login request origin:", origin);
+
     // For cross-origin cookies (Frontend on Vercel, Backend on api.qmenussy.com)
-    // We need: secure: true, sameSite: "none"
+    // We need: secure: true, sameSite: "none", and NO domain set
     const cookieOptions: any = {
       httpOnly: true,
       secure: isProd, // MUST be true in production for sameSite: "none"
       sameSite: isProd ? "none" : "lax", // "none" allows cross-origin cookies
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
-      // Don't set domain - let browser handle it based on the request origin
+      // IMPORTANT: Don't set domain - cookie will be scoped to api.qmenussy.com
+      // Browser will send it automatically with requests to api.qmenussy.com
+      // Frontend on www.qmenussy.com must use withCredentials: true to send it
     };
 
     // In development, explicitly set domain to undefined for localhost
@@ -385,7 +409,11 @@ export const loginUser = async (
       cookieOptions.domain = undefined;
     }
 
+    // Set the cookie
     res.cookie("auth-token", token, cookieOptions);
+
+    // Get the Set-Cookie header to verify it was set correctly
+    const setCookieHeader = res.getHeader("Set-Cookie");
 
     console.log("🍪 Login cookie set:", {
       httpOnly: true,
@@ -393,9 +421,13 @@ export const loginUser = async (
       sameSite: cookieOptions.sameSite,
       maxAge: "30 days",
       path: cookieOptions.path,
-      domain: cookieOptions.domain || "auto (browser will set based on origin)",
+      domain:
+        cookieOptions.domain || "not set (will default to api.qmenussy.com)",
       isProduction: isProd,
-      cookieHeader: res.getHeader("Set-Cookie"),
+      origin,
+      setCookieHeader: Array.isArray(setCookieHeader)
+        ? setCookieHeader[0]
+        : setCookieHeader,
     });
 
     res.json({

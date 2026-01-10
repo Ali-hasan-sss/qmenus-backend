@@ -68,8 +68,8 @@ echo "✅ Backend service is running"
 # Ensure nginx is using init config (allows HTTP for certbot challenge)
 echo "### Preparing nginx for certificate generation ..."
 
-# Create certbot webroot directory
-mkdir -p "$data_path/www"
+# Create certbot webroot directory and challenge directory
+mkdir -p "$data_path/www/.well-known/acme-challenge"
 
 # Start nginx
 echo "### Starting nginx ..."

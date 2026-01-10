@@ -245,22 +245,23 @@ export const registerUser = async (
       console.log("⚠️ No restaurant found in result");
     }
 
-    // Set httpOnly cookie
+    // Set httpOnly cookie with proper cross-origin support
     const isProd = process.env.NODE_ENV === "production";
 
-    // Determine cookie settings based on environment
+    // For cross-origin cookies (Frontend on Vercel, Backend on api.qmenussy.com)
+    // We need: secure: true, sameSite: "none"
     const cookieOptions: any = {
       httpOnly: true,
-      secure: isProd, // true in production (HTTPS required), false in development
-      sameSite: isProd ? "none" : "lax", // "none" for cross-origin in production, "lax" for same-site
+      secure: isProd, // MUST be true in production for sameSite: "none"
+      sameSite: isProd ? "none" : "lax", // "none" allows cross-origin cookies
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
+      // Don't set domain - let browser handle it based on the request origin
     };
 
-    // In production, don't set domain to allow cross-subdomain cookies
-    // In development, don't set domain for localhost
+    // In development, explicitly set domain to undefined for localhost
     if (!isProd) {
-      cookieOptions.domain = undefined; // localhost
+      cookieOptions.domain = undefined;
     }
 
     res.cookie("auth-token", token, cookieOptions);
@@ -365,22 +366,23 @@ export const loginUser = async (
       { expiresIn: process.env.JWT_EXPIRES_IN || "30d" } // Extended to 30 days
     );
 
-    // Set httpOnly cookie
+    // Set httpOnly cookie with proper cross-origin support
     const isProd = process.env.NODE_ENV === "production";
 
-    // Determine cookie settings based on environment
+    // For cross-origin cookies (Frontend on Vercel, Backend on api.qmenussy.com)
+    // We need: secure: true, sameSite: "none"
     const cookieOptions: any = {
       httpOnly: true,
-      secure: isProd, // true in production (HTTPS required), false in development
-      sameSite: isProd ? "none" : "lax", // "none" for cross-origin in production, "lax" for same-site
+      secure: isProd, // MUST be true in production for sameSite: "none"
+      sameSite: isProd ? "none" : "lax", // "none" allows cross-origin cookies
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
+      // Don't set domain - let browser handle it based on the request origin
     };
 
-    // In production, don't set domain to allow cross-subdomain cookies
-    // In development, don't set domain for localhost
+    // In development, explicitly set domain to undefined for localhost
     if (!isProd) {
-      cookieOptions.domain = undefined; // localhost
+      cookieOptions.domain = undefined;
     }
 
     res.cookie("auth-token", token, cookieOptions);
@@ -391,8 +393,9 @@ export const loginUser = async (
       sameSite: cookieOptions.sameSite,
       maxAge: "30 days",
       path: cookieOptions.path,
-      domain: cookieOptions.domain || "auto",
+      domain: cookieOptions.domain || "auto (browser will set based on origin)",
       isProduction: isProd,
+      cookieHeader: res.getHeader("Set-Cookie"),
     });
 
     res.json({
@@ -726,13 +729,20 @@ export const logoutUser = async (
   res: Response
 ): Promise<any> => {
   try {
-    // Clear httpOnly cookie
-    res.clearCookie("auth-token", {
+    // Clear httpOnly cookie with same settings used when setting it
+    const isProd = process.env.NODE_ENV === "production";
+    const clearCookieOptions: any = {
       httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: "lax", // Allow cross-origin cookies for development
+      secure: isProd, // Must match the cookie setting options
+      sameSite: isProd ? "none" : "lax", // Must match the cookie setting options
       path: "/",
-    });
+    };
+
+    if (!isProd) {
+      clearCookieOptions.domain = undefined;
+    }
+
+    res.clearCookie("auth-token", clearCookieOptions);
 
     res.json({
       success: true,

@@ -559,11 +559,9 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
     }
 
     // Calculate subtotal and taxes if not present (for old orders)
-    let orderSubtotal: number | Prisma.Decimal = order.subtotal
-      ? Number(order.subtotal)
-      : 0;
+    let orderSubtotal: number = order.subtotal ? Number(order.subtotal) : 0;
     let orderTaxes = order.taxes;
-    let orderTotalPrice: number | Prisma.Decimal = order.totalPrice
+    let orderTotalPrice: number = order.totalPrice
       ? Number(order.totalPrice)
       : 0;
 
@@ -589,9 +587,9 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
         await prisma.order.update({
           where: { id: order.id },
           data: {
-            subtotal: new Prisma.Decimal(orderSubtotal),
+            subtotal: orderSubtotal,
             taxes: orderTaxes || undefined,
-            totalPrice: new Prisma.Decimal(orderTotalPrice),
+            totalPrice: orderTotalPrice,
           },
         });
       }
@@ -600,7 +598,6 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
       orderSubtotal = Number(orderSubtotal);
       orderTotalPrice = Number(orderTotalPrice);
     }
-
     res.json({
       success: true,
       data: {

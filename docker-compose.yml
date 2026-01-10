@@ -97,20 +97,16 @@ services:
       sh -c "
         echo 'Waiting for database and redis...' &&
         sleep 5 &&
-        cd /app/api-service &&
+        cd /app/shared &&
         echo 'Running database migrations...' &&
-        npx prisma@5.22.0 migrate deploy --schema ../shared/prisma/schema.prisma || echo 'Migrations may have failed, continuing...' &&
+        npx prisma@5.22.0 migrate deploy --schema ./prisma/schema.prisma || echo 'Migrations may have failed, continuing...' &&
+        cd /app/api-service &&
         echo 'Checking and seeding database...' &&
         node scripts/check-and-seed.js || echo 'Seed may have failed, continuing...' &&
         cd /app &&
         echo 'Starting services with PM2...' &&
-        if [ -f pm2.config.js ]; then
-          pm2-runtime start pm2.config.js
-        else
-          echo 'ERROR: pm2.config.js not found!' &&
-          ls -la /app/ | grep pm2 &&
-          exit 1
-        fi
+        ls -la /app/pm2.config.js &&
+        pm2-runtime start pm2.config.js
       "
 
   # Nginx Reverse Proxy

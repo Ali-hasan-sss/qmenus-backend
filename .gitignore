@@ -17,6 +17,13 @@ nginx/ssl/*.key
 nginx/ssl/*.crt
 !nginx/ssl/.gitkeep
 
+# Let's Encrypt certificates (should not be committed)
+nginx/certbot/conf/
+nginx/certbot/work/
+nginx/certbot/logs/
+nginx/certbot/www/
+!nginx/certbot/www/.gitkeep
+
 # Docker volumes
 postgres_data/
 redis_data/

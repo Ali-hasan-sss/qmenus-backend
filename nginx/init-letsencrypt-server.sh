@@ -55,6 +55,15 @@ if [ -d "$data_path/conf/live/${domains[0]}" ]; then
   exit 0
 fi
 
+# Ensure all required directories exist
+echo "### Creating required directories ..."
+mkdir -p "$data_path/www/.well-known/acme-challenge"
+mkdir -p "$data_path/conf"
+mkdir -p "$data_path/work"
+mkdir -p "$data_path/logs"
+chmod -R 755 "$data_path/www" 2>/dev/null || true
+echo "✅ Directories created: $data_path/www/.well-known/acme-challenge"
+
 # Ensure backend is running first (nginx needs it)
 echo "### Ensuring backend services are running..."
 docker compose up -d postgres redis backend
@@ -75,9 +84,6 @@ echo "✅ Backend service is running"
 # Ensure nginx is using init config (allows HTTP for certbot challenge)
 echo "### Preparing nginx for certificate generation ..."
 
-# Create certbot webroot directory and challenge directory
-mkdir -p "$data_path/www/.well-known/acme-challenge"
-
 # Start nginx
 echo "### Starting nginx ..."
 docker compose up -d nginx
@@ -93,18 +99,21 @@ if ! docker compose exec -T nginx nginx -t 2>/dev/null; then
     echo "⚠️  Continuing anyway - nginx may still work..."
 fi
 
-# Ensure challenge directory exists
-echo "### Preparing challenge directory ..."
-mkdir -p "$data_path/www/.well-known/acme-challenge"
-chmod -R 755 "$data_path/www" 2>/dev/null || true
-
-# Verify directory structure
+# Verify directory structure (should already exist from above, but double-check)
 echo "### Verifying setup ..."
 if [ -d "$data_path/www/.well-known/acme-challenge" ]; then
-  echo "✅ Challenge directory created: $data_path/www/.well-known/acme-challenge"
+  echo "✅ Challenge directory exists: $data_path/www/.well-known/acme-challenge"
 else
   echo "❌ Failed to create challenge directory"
   exit 1
+fi
+
+# Verify directory is writable (for certbot)
+if [ -w "$data_path/www/.well-known/acme-challenge" ]; then
+  echo "✅ Challenge directory is writable"
+else
+  echo "⚠️  Challenge directory may not be writable - setting permissions..."
+  chmod -R 755 "$data_path/www"
 fi
 
 # Verify nginx is running

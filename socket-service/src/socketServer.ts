@@ -16,7 +16,7 @@ const getAllowedOrigins = (): string[] | boolean => {
     return env.ALLOWED_ORIGINS;
   }
 
-  return process.env.FRONTEND_URL || "http://localhost:3000";
+  return [env.FRONTEND_URL || "http://localhost:3000"];
 };
 
 const app = express();

@@ -26,6 +26,18 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
+// Root endpoint for socket service
+app.get("/", (_req: Request, res: Response) => {
+  res.json({
+    service: "socket-service",
+    status: "running",
+    endpoints: {
+      health: "/health",
+      socket: "Socket.IO connection endpoint",
+    },
+  });
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {

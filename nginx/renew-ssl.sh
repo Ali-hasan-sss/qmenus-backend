@@ -14,7 +14,12 @@ cd "$BACKEND_DIR"
 
 echo "🔄 Renewing SSL certificates..."
 
+# Ensure webroot directory exists
+mkdir -p "$data_path/www/.well-known/acme-challenge"
+
 certbot renew \
+  --webroot \
+  --webroot-path="$data_path/www" \
   --config-dir "$data_path/conf" \
   --work-dir "$data_path/work" \
   --logs-dir "$data_path/logs" \

@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Script to renew SSL certificates and reload nginx
+# Usage: ./nginx/renew-ssl.sh
+# Can be added to crontab for auto-renewal
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_DIR="$(dirname "$SCRIPT_DIR")"
+data_path="$BACKEND_DIR/nginx/certbot"
+
+cd "$BACKEND_DIR"
+
+echo "🔄 Renewing SSL certificates..."
+
+certbot renew \
+  --config-dir "$data_path/conf" \
+  --work-dir "$data_path/work" \
+  --logs-dir "$data_path/logs" \
+  --quiet
+
+if [ $? -eq 0 ]; then
+  echo "✅ Certificates renewed successfully"
+  
+  # Reload nginx to use renewed certificates
+  echo "🔄 Reloading nginx..."
+  docker compose exec nginx nginx -s reload
+  
+  echo "✅ SSL renewal complete!"
+else
+  echo "⚠️  No certificates needed renewal"
+fi

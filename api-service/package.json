@@ -12,7 +12,7 @@
     "prisma": "cd ../shared && npm run prisma:generate",
     "prestart": "npm run build && node scripts/check-and-seed.js",
     "start": "node dist/api-service/src/app.js",
-    "create:restaurant": "npx ts-node scripts/create-restaurant-enterprise.ts"
+    "create:restaurant": "cd ../shared && npm run prisma:generate && cd ../api-service && npx ts-node scripts/create-restaurant-enterprise.ts"
   },
   "dependencies": {
     "@types/multer": "^1.4.11",

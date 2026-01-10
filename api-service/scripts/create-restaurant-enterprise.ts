@@ -18,27 +18,45 @@ for (const envPath of envPaths) {
   }
 }
 
-// Import Prisma Client from shared location (same as db.ts)
+// Import Prisma Client from shared location
+// Structure: backend/api-service/scripts/ -> backend/shared/node_modules/@prisma/client
+// From scripts: ../../shared/node_modules/@prisma/client
+const possiblePaths = [
+  path.resolve(__dirname, "../../shared/node_modules/@prisma/client"), // From scripts folder
+  path.resolve(process.cwd(), "../shared/node_modules/@prisma/client"), // From api-service folder
+  path.resolve(__dirname, "../../../shared/node_modules/@prisma/client"), // Alternative
+];
+
 let PrismaClient: any;
-try {
-  // Try the path relative to compiled location first (dist/shared/config/)
-  const compiledPath = path.resolve(
-    __dirname,
-    "../../../shared/node_modules/@prisma/client"
-  );
-  PrismaClient = require(compiledPath).PrismaClient;
-} catch {
-  // Fallback to path relative to source location (backend/shared/)
-  try {
-    const sourcePath = path.resolve(
-      __dirname,
-      "../../../shared/node_modules/@prisma/client"
-    );
-    PrismaClient = require(sourcePath).PrismaClient;
-  } catch {
-    // Last fallback - try from api-service node_modules
-    PrismaClient = require("@prisma/client").PrismaClient;
+let prismaPath: string | null = null;
+
+for (const testPath of possiblePaths) {
+  if (existsSync(testPath)) {
+    prismaPath = testPath;
+    console.log(`✅ Found Prisma Client at: ${testPath}`);
+    break;
   }
+}
+
+if (!prismaPath) {
+  console.error("❌ Prisma Client not found. Searched paths:");
+  possiblePaths.forEach((p, i) => {
+    const exists = existsSync(p);
+    console.error(`  ${i + 1}. ${p} ${exists ? "✅" : "❌"}`);
+  });
+  console.error("\n__dirname:", __dirname);
+  console.error("process.cwd():", process.cwd());
+  console.error("\nPlease ensure Prisma Client is generated:");
+  console.error("  cd ../shared && npm run prisma:generate");
+  process.exit(1);
+}
+
+try {
+  PrismaClient = require(prismaPath).PrismaClient;
+  console.log("✅ Successfully loaded Prisma Client");
+} catch (error: any) {
+  console.error("❌ Failed to load Prisma Client:", error.message);
+  process.exit(1);
 }
 
 const prisma = new PrismaClient();
@@ -621,7 +639,6 @@ async function main() {
         description: "A sample restaurant with full menu",
         descriptionAr: "مطعم تجريبي بقائمة كاملة",
         email: "res@qmenussy.com",
-        currency: "SYP",
         ownerId: user.id,
       },
     });

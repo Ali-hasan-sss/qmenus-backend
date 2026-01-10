@@ -32,12 +32,24 @@ const app = express();
 // Trust proxy for production
 app.set("trust proxy", 1);
 
-// CORS configuration - strict in production, relaxed in development
+// CORS configuration - supports multiple origins
 const isProd = env.NODE_ENV === "production";
-const baseFrontend = env.FRONTEND_URL || "http://localhost:3000";
+const getAllowedOrigins = (): string[] | boolean => {
+  if (!isProd) {
+    return true; // Allow all origins in development
+  }
+
+  // Use ALLOWED_ORIGINS if set, otherwise fallback to FRONTEND_URL
+  if (env.ALLOWED_ORIGINS && env.ALLOWED_ORIGINS.length > 0) {
+    return env.ALLOWED_ORIGINS;
+  }
+
+  return env.FRONTEND_URL || "http://localhost:3000";
+};
+
 app.use(
   cors({
-    origin: isProd ? baseFrontend : true,
+    origin: getAllowedOrigins(),
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [

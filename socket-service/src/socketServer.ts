@@ -5,13 +5,24 @@ import { Server } from "socket.io";
 import { env } from "../../shared/config/env";
 import { setupSocketHandlers } from "./events/orderHandlers";
 
+// CORS configuration for Socket Service - supports multiple origins
+const getAllowedOrigins = (): string[] | boolean => {
+  if (env.NODE_ENV !== "production") {
+    return true; // Allow all origins in development
+  }
+
+  // Use ALLOWED_ORIGINS if set, otherwise fallback to FRONTEND_URL
+  if (env.ALLOWED_ORIGINS && env.ALLOWED_ORIGINS.length > 0) {
+    return env.ALLOWED_ORIGINS;
+  }
+
+  return process.env.FRONTEND_URL || "http://localhost:3000";
+};
+
 const app = express();
 app.use(
   cors({
-    origin:
-      env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL || "http://localhost:3000"
-        : true,
+    origin: getAllowedOrigins(),
     credentials: true,
   })
 );
@@ -41,10 +52,7 @@ app.get("/", (_req: Request, res: Response) => {
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin:
-      env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL || "http://localhost:3000"
-        : true,
+    origin: getAllowedOrigins(),
     methods: ["GET", "POST"],
     credentials: true,
   },

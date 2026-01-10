@@ -113,7 +113,7 @@ sudo systemctl status postgresql
 # إنشاء قاعدة بيانات
 sudo -u postgres psql <<EOF
 CREATE DATABASE qmenus;
-CREATE USER qmenus_user WITH ENCRYPTED PASSWORD 'your_secure_password_here';
+CREATE USER qmenus_user WITH ENCRYPTED PASSWORD Molazem1992;
 GRANT ALL PRIVILEGES ON DATABASE qmenus TO qmenus_user;
 ALTER DATABASE qmenus OWNER TO qmenus_user;
 \q

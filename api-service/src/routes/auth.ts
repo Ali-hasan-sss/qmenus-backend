@@ -247,20 +247,32 @@ export const registerUser = async (
 
     // Set httpOnly cookie
     const isProd = process.env.NODE_ENV === "production";
-    res.cookie("auth-token", token, {
+
+    // Determine cookie settings based on environment
+    const cookieOptions: any = {
       httpOnly: true,
-      secure: false, // Allow cookies in development
-      sameSite: "lax", // Allow cookies to be sent
+      secure: isProd, // true in production (HTTPS required), false in development
+      sameSite: isProd ? "none" : "lax", // "none" for cross-origin in production, "lax" for same-site
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
-      domain: undefined, // Don't set domain for localhost
-    });
+    };
 
-    console.log("🍪 Cookie set:", {
+    // In production, don't set domain to allow cross-subdomain cookies
+    // In development, don't set domain for localhost
+    if (!isProd) {
+      cookieOptions.domain = undefined; // localhost
+    }
+
+    res.cookie("auth-token", token, cookieOptions);
+
+    console.log("🍪 Register cookie set:", {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
       maxAge: "30 days",
+      path: cookieOptions.path,
+      domain: cookieOptions.domain || "auto",
+      isProduction: isProd,
     });
 
     res.status(201).json({
@@ -355,20 +367,32 @@ export const loginUser = async (
 
     // Set httpOnly cookie
     const isProd = process.env.NODE_ENV === "production";
-    res.cookie("auth-token", token, {
+
+    // Determine cookie settings based on environment
+    const cookieOptions: any = {
       httpOnly: true,
-      secure: false, // Allow cookies in development
-      sameSite: "lax", // Allow cookies to be sent
+      secure: isProd, // true in production (HTTPS required), false in development
+      sameSite: isProd ? "none" : "lax", // "none" for cross-origin in production, "lax" for same-site
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       path: "/",
-      domain: undefined, // Don't set domain for localhost
-    });
+    };
 
-    console.log("🍪 Cookie set:", {
+    // In production, don't set domain to allow cross-subdomain cookies
+    // In development, don't set domain for localhost
+    if (!isProd) {
+      cookieOptions.domain = undefined; // localhost
+    }
+
+    res.cookie("auth-token", token, cookieOptions);
+
+    console.log("🍪 Login cookie set:", {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
       maxAge: "30 days",
+      path: cookieOptions.path,
+      domain: cookieOptions.domain || "auto",
+      isProduction: isProd,
     });
 
     res.json({

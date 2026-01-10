@@ -7,17 +7,10 @@ on:
       - master
     paths:
       - "backend/**"
-      # Only trigger on backend changes, ignore frontend and other directories
+      - ".github/workflows/deploy-backend.yml"
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
-# ============================================
-# Backend Deployment Workflow
-# ============================================
-# This workflow is specifically for backend deployment only.
-# It will trigger ONLY when changes are made to backend/ directory.
-# Location: This file must be in .github/workflows/ at repository root
-# Target: Deploys only the backend service located in backend/ directory
-# ============================================
+# This workflow deploys the backend without Docker, using PM2 directly
 
 jobs:
   deploy:
@@ -48,89 +41,149 @@ jobs:
         run: |
           sshpass -p "${SERVER_PASSWORD}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=~/.ssh/known_hosts ${SERVER_USER}@${SERVER_HOST} bash -s << EOF
             set -e
-            
-            # SERVER_PATH should point directly to backend directory on server
-            # Example: /opt/qmenus/qmenus-backend (where docker-compose.yml is located)
+
             SERVER_PATH="${SERVER_PATH:-/opt/qmenus/qmenus-backend}"
-            
-            echo "🚀 Starting Backend deployment..."
-            echo "📁 Backend path: \${SERVER_PATH}"
-            
-            # Navigate to backend directory on server
-            cd "\${SERVER_PATH}"
-            
-            # Verify we're in the correct backend directory (contains docker-compose.yml)
-            if [ ! -f "docker-compose.yml" ]; then
-              echo "❌ Error: docker-compose.yml not found in \${SERVER_PATH}"
-              echo "   Make sure SERVER_PATH points to the backend directory"
-              exit 1
+
+            echo "🚀 Starting deployment..."
+            echo "📁 Server path: ${SERVER_PATH}"
+
+            # Navigate to backend directory
+            cd "${SERVER_PATH}"
+
+            # If SERVER_PATH points to root project, navigate to backend subdirectory
+            if [ -d "backend" ] && [ ! -f "pm2.config.js" ]; then
+              echo "📂 Navigating to backend subdirectory..."
+              cd backend
             fi
-            
-            echo "✅ Found docker-compose.yml in backend directory"
-            
-            # Pull latest changes
+
+            # Pull latest changes (ignore local changes)
             echo "📥 Pulling latest changes..."
             git fetch origin
             CURRENT_BRANCH=\$(git rev-parse --abbrev-ref HEAD)
             git reset --hard origin/\${CURRENT_BRANCH} || git reset --hard origin/main || git reset --hard origin/master
-            
+
             # Backup current .env file if it exists
             if [ -f .env ]; then
               echo "💾 Backing up .env file..."
-              cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+              cp .env .env.backup.\$(date +%Y%m%d_%H%M%S)
             fi
-            
+
             # Create necessary directories
             echo "📁 Creating directories..."
             mkdir -p nginx/logs
             mkdir -p api-service/logs
             mkdir -p socket-service/logs
             mkdir -p jobs-service/logs
-            
-            # Build and restart containers
-            echo "🔨 Building Docker images..."
-            docker-compose build --no-cache
-            
-            echo "🛑 Stopping containers..."
-            docker-compose down || true
-            
-            echo "🚀 Starting containers..."
-            docker-compose up -d
-            
-            echo "⏳ Waiting for services to be healthy..."
-            sleep 15
-            
-            # Check if containers are running
-            echo "📊 Container status:"
-            docker-compose ps
-            
+
+            # Check if Node.js is installed
+            if ! command -v node &> /dev/null; then
+              echo "❌ Node.js is not installed. Installing Node.js 20..."
+              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            fi
+
+            NODE_VERSION=\$(node --version)
+            echo "✅ Node.js version: \${NODE_VERSION}"
+
+            # Check if PM2 is installed globally
+            if ! command -v pm2 &> /dev/null; then
+              echo "📦 Installing PM2 globally..."
+              sudo npm install -g pm2
+            fi
+
+            # Install dependencies
+            echo "📦 Installing root dependencies..."
+            npm install
+
+            # Install shared dependencies
+            echo "📦 Installing shared dependencies..."
+            cd shared
+            npm install
+            cd ..
+
+            # Install api-service dependencies
+            echo "📦 Installing api-service dependencies..."
+            cd api-service
+            npm install
+            cd ..
+
+            # Install socket-service dependencies
+            echo "📦 Installing socket-service dependencies..."
+            cd socket-service
+            npm install
+            cd ..
+
+            # Install jobs-service dependencies
+            echo "📦 Installing jobs-service dependencies..."
+            cd jobs-service
+            npm install
+            cd ..
+
+            # Generate Prisma Client
+            echo "🔧 Generating Prisma Client..."
+            cd shared
+            npx prisma@5.22.0 generate --schema ./prisma/schema.prisma
+            cd ..
+
+            # Build all services
+            echo "🔨 Building all services..."
+            npm run build:all
+
+            # Run database migrations
+            echo "🗄️  Running database migrations..."
+            cd shared
+            npx prisma@5.22.0 migrate deploy --schema ./prisma/schema.prisma || echo "⚠️  Migration skipped or failed"
+            cd ..
+
+            # Seed database if needed
+            echo "🌱 Checking database seed..."
+            cd api-service
+            node scripts/check-and-seed.js || echo "⚠️  Seed skipped or failed"
+            cd ..
+
+            # Stop existing PM2 processes
+            echo "🛑 Stopping existing PM2 processes..."
+            pm2 stop pm2.config.js || true
+            pm2 delete pm2.config.js || true
+
+            # Start services with PM2
+            echo "▶️  Starting services with PM2..."
+            pm2 start pm2.config.js
+
+            # Save PM2 configuration
+            pm2 save
+
+            # Wait a bit for services to start
+            echo "⏳ Waiting for services to be ready..."
+            sleep 5
+
+            # Check PM2 status
+            echo "📊 PM2 Status:"
+            pm2 status
+
             # Health check
             echo "🏥 Checking service health..."
-            if docker-compose ps | grep -q "Up"; then
-              echo "✅ Containers are running!"
-              
-              # Run database migrations
-              echo "🗄️  Running database migrations..."
-              docker-compose exec -T backend sh -c "cd /app/api-service && npx prisma@5.22.0 migrate deploy --schema ../shared/prisma/schema.prisma" || echo "⚠️  Migration skipped or failed"
-              
-              # Seed database if needed
-              echo "🌱 Checking database seed..."
-              docker-compose exec -T backend node /app/api-service/scripts/check-and-seed.js || echo "⚠️  Seed skipped or failed"
-              
+            if pm2 list | grep -q "online"; then
+              echo "✅ Services are running!"
+
+              # Test API health
+              if command -v curl &> /dev/null; then
+                echo "🔍 Testing API health endpoint..."
+                curl -f http://localhost:5000/health || echo "⚠️  API health check failed"
+              fi
+
               echo "✅ Deployment successful!"
             else
-              echo "❌ Deployment failed - containers are not running"
-              echo "📋 Recent logs:"
-              docker-compose logs --tail=50
+              echo "❌ Deployment failed - services are not running"
+              echo "📋 PM2 logs:"
+              pm2 logs --lines 50 --nostream
               exit 1
             fi
-            
-            # Clean up old images (optional)
-            echo "🧹 Cleaning up old Docker images..."
-            docker image prune -f || true
-            
+
             echo "✨ Deployment completed successfully!"
-            echo "📊 View logs with: docker-compose logs -f"
+            echo "📊 View logs with: pm2 logs"
+            echo "📊 View status with: pm2 status"
+            echo "🔄 Restart services with: pm2 restart pm2.config.js"
           EOF
 
       - name: Deployment Summary

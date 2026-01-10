@@ -22,7 +22,7 @@ data_path="$BACKEND_DIR/nginx/certbot"
 cd "$BACKEND_DIR"
 
 echo "=========================================="
-echo "Let's Encrypt SSL Certificate Setup (Server Mode)"
+echo "Let's Encrypt SSL Certificate Setup (Server Mode - No Docker)"
 echo "=========================================="
 echo "Domains: ${domains[*]}"
 echo "Email: $email"
@@ -33,8 +33,8 @@ echo
 if ! command -v certbot &> /dev/null; then
   echo "❌ Certbot is not installed on the server."
   echo "   Installing certbot..."
-  apt-get update
-  apt-get install -y certbot
+  sudo apt-get update
+  sudo apt-get install -y certbot
 fi
 
 # Download recommended TLS parameters if they don't exist
@@ -64,43 +64,88 @@ mkdir -p "$data_path/logs"
 chmod -R 755 "$data_path/www" 2>/dev/null || true
 echo "✅ Directories created: $data_path/www/.well-known/acme-challenge"
 
-# Ensure backend is running first (nginx needs it)
+# Ensure backend services are running (PM2)
 echo "### Ensuring backend services are running..."
-docker compose up -d postgres redis backend
-
-echo "### Waiting for backend to be ready..."
-sleep 15
-
-# Check if backend is running
-if ! docker compose ps backend | grep -q "Up"; then
-  echo "❌ Backend service is not running"
-  echo "   Checking logs..."
-  docker compose logs backend --tail=30
+if ! command -v pm2 &> /dev/null; then
+  echo "❌ PM2 is not installed. Please install PM2 first."
   exit 1
 fi
 
-echo "✅ Backend service is running"
-
-# Ensure nginx is using init config (allows HTTP for certbot challenge)
-echo "### Preparing nginx for certificate generation ..."
-
-# Start nginx
-echo "### Starting nginx ..."
-docker compose up -d nginx
-
-# Wait for nginx to be ready
-echo "### Waiting for nginx to be ready ..."
-sleep 10
-
-# Test if nginx config is valid
-if ! docker compose exec -T nginx nginx -t 2>/dev/null; then
-    echo "⚠️  Nginx configuration test failed, checking logs..."
-    docker compose logs nginx --tail=20
-    echo "⚠️  Continuing anyway - nginx may still work..."
+# Check if services are running
+if pm2 list | grep -q "online"; then
+  echo "✅ Backend services are running (PM2)"
+else
+  echo "⚠️  Backend services are not running. Starting them..."
+  if [ -f "pm2.config.js" ]; then
+    pm2 start pm2.config.js || echo "⚠️  Failed to start services, continuing anyway..."
+  else
+    echo "⚠️  pm2.config.js not found. Please start services manually."
+  fi
 fi
 
-# Verify directory structure (should already exist from above, but double-check)
-echo "### Verifying setup ..."
+# Wait for services to be ready
+echo "### Waiting for services to be ready..."
+sleep 5
+
+# Check if services are listening on ports
+if ! netstat -tuln 2>/dev/null | grep -q ":5000" && ! ss -tuln 2>/dev/null | grep -q ":5000"; then
+  echo "⚠️  Service on port 5000 may not be running"
+  echo "   Check with: pm2 status"
+fi
+
+# Ensure nginx is installed and configured
+echo "### Checking nginx..."
+if ! command -v nginx &> /dev/null; then
+  echo "❌ Nginx is not installed. Installing nginx..."
+  sudo apt-get update
+  sudo apt-get install -y nginx
+fi
+
+# Copy nginx init config if not already configured
+NGINX_CONFIG_PATH="/etc/nginx/sites-available/qmenus-backend"
+if [ ! -f "$NGINX_CONFIG_PATH" ]; then
+  echo "### Setting up nginx configuration..."
+  sudo cp "$NGINX_DIR/nginx-init.conf" "$NGINX_CONFIG_PATH"
+  
+  # Create symlink if it doesn't exist
+  if [ ! -L "/etc/nginx/sites-enabled/qmenus-backend" ]; then
+    sudo ln -s "$NGINX_CONFIG_PATH" /etc/nginx/sites-enabled/
+  fi
+  
+  # Remove default nginx site if it exists
+  sudo rm -f /etc/nginx/sites-enabled/default
+  
+  # Update webroot path in nginx config
+  sudo sed -i "s|/var/www/certbot|$data_path/www|g" "$NGINX_CONFIG_PATH"
+fi
+
+# Test nginx configuration
+echo "### Testing nginx configuration..."
+if sudo nginx -t; then
+  echo "✅ Nginx configuration is valid"
+else
+  echo "❌ Nginx configuration test failed"
+  exit 1
+fi
+
+# Start/restart nginx
+echo "### Starting/restarting nginx..."
+sudo systemctl restart nginx || sudo service nginx restart
+
+# Wait for nginx to be ready
+echo "### Waiting for nginx to be ready..."
+sleep 5
+
+# Check if nginx is running
+if sudo systemctl is-active --quiet nginx || pgrep nginx > /dev/null; then
+  echo "✅ Nginx is running"
+else
+  echo "❌ Nginx is not running"
+  exit 1
+fi
+
+# Verify challenge directory is accessible via nginx
+echo "### Verifying challenge directory setup..."
 if [ -d "$data_path/www/.well-known/acme-challenge" ]; then
   echo "✅ Challenge directory exists: $data_path/www/.well-known/acme-challenge"
 else
@@ -108,26 +153,11 @@ else
   exit 1
 fi
 
-# Verify directory is writable (for certbot)
-if [ -w "$data_path/www/.well-known/acme-challenge" ]; then
-  echo "✅ Challenge directory is writable"
-else
-  echo "⚠️  Challenge directory may not be writable - setting permissions..."
-  chmod -R 755 "$data_path/www"
-fi
-
-# Verify nginx is running
-if docker compose ps nginx | grep -q "Up"; then
-  echo "✅ Nginx is running"
-else
-  echo "❌ Nginx is not running"
-  exit 1
-fi
+# Make sure directory is writable
+chmod -R 755 "$data_path/www" 2>/dev/null || sudo chmod -R 755 "$data_path/www"
 
 echo "✅ Ready for certificate generation"
 echo "   Certbot will verify HTTP challenge automatically during request"
-echo
-
 echo
 
 # Prepare domain arguments
@@ -153,8 +183,8 @@ echo "   Webroot: $data_path/www"
 echo "   This may take 1-3 minutes..."
 echo
 
-# Request certificate using certbot on the server (not in Docker)
-certbot certonly \
+# Request certificate using certbot
+sudo certbot certonly \
   --webroot \
   --webroot-path="$data_path/www" \
   $staging_arg \
@@ -174,36 +204,26 @@ if [ $? -eq 0 ]; then
   # Switch to SSL-enabled nginx config
   echo "### Switching to SSL-enabled nginx configuration ..."
   
-  # Stop nginx
-  docker compose stop nginx
+  # Copy SSL nginx config
+  sudo cp "$NGINX_DIR/nginx-certs.conf" "$NGINX_CONFIG_PATH"
   
-  # Update docker-compose.yml to use nginx-certs.conf
-  echo "### Updating docker-compose.yml to use SSL config ..."
-  if command -v sed &> /dev/null; then
-    sed -i.bak "s|nginx-init.conf|nginx-certs.conf|g" docker-compose.yml
-    echo "✅ Updated docker-compose.yml"
-  else
-    echo "⚠️  Please manually update docker-compose.yml:"
-    echo "   Change: nginx-init.conf -> nginx-certs.conf in nginx volumes"
-  fi
+  # Update certificate paths in nginx config (certificates are in standard location)
+  # Let's Encrypt stores certificates in standard location: /etc/letsencrypt/live/
+  # But we're using custom location, so we need to update paths
+  sudo sed -i "s|/etc/letsencrypt/live/api.qmenussy.com|$data_path/conf/live/api.qmenussy.com|g" "$NGINX_CONFIG_PATH"
   
-  # Update volume mount to use the certificates from server
-  # Certificates are now in: nginx/certbot/conf/live/api.qmenussy.com/
-  # Docker volume already mounts this, so no change needed
-  
-  # Start nginx with SSL config
-  echo "### Starting nginx with SSL configuration ..."
-  docker compose up -d nginx
-  sleep 5
-  
-  # Test nginx config
-  if docker compose exec nginx nginx -t; then
+  # Test nginx configuration
+  if sudo nginx -t; then
     echo "✅ Nginx SSL configuration is valid"
   else
     echo "❌ Nginx SSL configuration test failed"
-    docker compose logs nginx --tail=20
+    sudo nginx -t
     exit 1
   fi
+  
+  # Reload nginx
+  echo "### Reloading nginx with SSL configuration ..."
+  sudo systemctl reload nginx || sudo service nginx reload
   
   echo "=========================================="
   echo "✅ SSL Certificate Setup Complete!"
@@ -222,7 +242,7 @@ if [ $? -eq 0 ]; then
   echo "Certificates will auto-renew via certbot service or cron job."
   echo ""
   echo "To set up auto-renewal, add to crontab:"
-  echo "  0 3 * * * certbot renew --quiet --config-dir $data_path/conf --work-dir $data_path/work --logs-dir $data_path/logs && docker compose -f $BACKEND_DIR/docker-compose.yml exec nginx nginx -s reload"
+  echo "  0 3 * * * certbot renew --quiet --webroot --webroot-path=$data_path/www --config-dir $data_path/conf --work-dir $data_path/work --logs-dir $data_path/logs && sudo systemctl reload nginx"
 else
   echo ""
   echo "❌ Failed to obtain certificate"

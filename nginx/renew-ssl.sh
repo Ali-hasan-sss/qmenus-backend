@@ -17,7 +17,7 @@ echo "🔄 Renewing SSL certificates..."
 # Ensure webroot directory exists
 mkdir -p "$data_path/www/.well-known/acme-challenge"
 
-certbot renew \
+sudo certbot renew \
   --webroot \
   --webroot-path="$data_path/www" \
   --config-dir "$data_path/conf" \
@@ -30,7 +30,7 @@ if [ $? -eq 0 ]; then
   
   # Reload nginx to use renewed certificates
   echo "🔄 Reloading nginx..."
-  docker compose exec nginx nginx -s reload
+  sudo systemctl reload nginx || sudo service nginx reload
   
   echo "✅ SSL renewal complete!"
 else

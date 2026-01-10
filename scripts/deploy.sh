@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Deployment script for QMenus Backend
+# Deployment script for QMenus Backend (Without Docker)
 # Usage: ./scripts/deploy.sh
 
 set -e
@@ -13,10 +13,19 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Check if SSL certificates exist
-if [ ! -f nginx/ssl/cert.pem ] || [ ! -f nginx/ssl/key.pem ]; then
-    echo "⚠️  SSL certificates not found. Running setup-ssl.sh..."
-    ./scripts/setup-ssl.sh
+# Load environment variables
+export $(cat .env | grep -v '^#' | xargs)
+
+# Check if Node.js is installed
+if ! command -v node &> /dev/null; then
+    echo "❌ Node.js is not installed. Please install Node.js 20 or higher."
+    exit 1
+fi
+
+# Check if PM2 is installed globally
+if ! command -v pm2 &> /dev/null; then
+    echo "📦 Installing PM2 globally..."
+    npm install -g pm2
 fi
 
 # Create necessary directories
@@ -26,34 +35,74 @@ mkdir -p api-service/logs
 mkdir -p socket-service/logs
 mkdir -p jobs-service/logs
 
-# Stop existing containers
-echo "🛑 Stopping existing containers..."
-docker-compose down
+# Install dependencies
+echo "📦 Installing dependencies..."
+npm install
 
-# Build images
-echo "🔨 Building Docker images..."
-docker-compose build --no-cache
+# Install shared dependencies
+echo "📦 Installing shared dependencies..."
+cd shared
+npm install
+cd ..
 
-# Start services
-echo "▶️  Starting services..."
-docker-compose up -d
+# Install api-service dependencies
+echo "📦 Installing api-service dependencies..."
+cd api-service
+npm install
+cd ..
 
-# Wait for services to be ready
-echo "⏳ Waiting for services to be ready..."
-sleep 10
+# Install socket-service dependencies
+echo "📦 Installing socket-service dependencies..."
+cd socket-service
+npm install
+cd ..
 
-# Check service health
-echo "🏥 Checking service health..."
-docker-compose ps
+# Install jobs-service dependencies
+echo "📦 Installing jobs-service dependencies..."
+cd jobs-service
+npm install
+cd ..
+
+# Generate Prisma Client
+echo "🔧 Generating Prisma Client..."
+cd shared
+npx prisma@5.22.0 generate --schema ./prisma/schema.prisma
+cd ..
+
+# Build all services
+echo "🔨 Building all services..."
+npm run build:all
 
 # Run database migrations
 echo "🗄️  Running database migrations..."
-docker-compose exec -T backend npx prisma@5.22.0 migrate deploy --schema /app/shared/prisma/schema.prisma || true
+cd shared
+npx prisma@5.22.0 migrate deploy --schema ./prisma/schema.prisma || echo "⚠️  Migration skipped or failed"
+cd ..
 
 # Seed database if needed
-echo "🌱 Seeding database..."
-docker-compose exec -T backend node /app/api-service/scripts/check-and-seed.js || true
+echo "🌱 Checking database seed..."
+cd api-service
+node scripts/check-and-seed.js || echo "⚠️  Seed skipped or failed"
+cd ..
+
+# Stop existing PM2 processes
+echo "🛑 Stopping existing PM2 processes..."
+pm2 stop pm2.config.js || true
+pm2 delete pm2.config.js || true
+
+# Start services with PM2
+echo "▶️  Starting services with PM2..."
+pm2 start pm2.config.js
+
+# Save PM2 configuration
+pm2 save
+
+# Setup PM2 startup script
+echo "⚙️  Setting up PM2 startup script..."
+pm2 startup || echo "⚠️  Startup script setup may require sudo"
 
 echo "✅ Deployment complete!"
-echo "📊 View logs with: docker-compose logs -f"
-echo "🌐 API URL: https://api.qmenussy.com"
+echo "📊 View logs with: pm2 logs"
+echo "📊 View status with: pm2 status"
+echo "🌐 API URL: http://localhost:5000"
+echo "🌐 Socket URL: http://localhost:5001"

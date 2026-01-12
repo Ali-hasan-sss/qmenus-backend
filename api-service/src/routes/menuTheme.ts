@@ -35,9 +35,11 @@ router.get(
 
       // If no theme exists, create default theme
       if (!theme) {
+        // Remove id from DEFAULT_THEME if it exists (Prisma will generate it)
+        const { id, ...defaultThemeWithoutId } = DEFAULT_THEME as any;
         theme = await prisma.menuTheme.create({
           data: {
-            ...DEFAULT_THEME,
+            ...defaultThemeWithoutId,
             restaurantId,
           },
         });
@@ -69,27 +71,19 @@ router.put(
       const restaurantId = req.user!.restaurantId!;
       const updateData = req.body;
 
-      // Find existing theme or create new one
-      let theme = await prisma.menuTheme.findUnique({
-        where: { restaurantId },
-      });
+      // Remove id from DEFAULT_THEME if it exists (Prisma will generate it)
+      const { id, ...defaultThemeWithoutId } = DEFAULT_THEME as any;
 
-      if (!theme) {
-        // Create new theme with default values
-        theme = await prisma.menuTheme.create({
-          data: {
-            ...DEFAULT_THEME,
-            ...updateData,
-            restaurantId,
-          },
-        });
-      } else {
-        // Update existing theme
-        theme = await prisma.menuTheme.update({
-          where: { restaurantId },
-          data: updateData,
-        });
-      }
+      // Use upsert to create or update theme
+      const theme = await prisma.menuTheme.upsert({
+        where: { restaurantId },
+        update: updateData,
+        create: {
+          ...defaultThemeWithoutId,
+          ...updateData,
+          restaurantId,
+        },
+      });
 
       res.json({
         success: true,
@@ -265,22 +259,19 @@ router.post(
         where: { restaurantId },
       });
 
-      if (!theme) {
-        // Create new theme with default values
-        theme = await prisma.menuTheme.create({
-          data: {
-            ...DEFAULT_THEME,
-            ...template,
-            restaurantId,
-          },
-        });
-      } else {
-        // Update existing theme
-        theme = await prisma.menuTheme.update({
-          where: { restaurantId },
-          data: template,
-        });
-      }
+      // Remove id from DEFAULT_THEME if it exists (Prisma will generate it)
+      const { id, ...defaultThemeWithoutId } = DEFAULT_THEME as any;
+
+      // Use upsert to create or update theme
+      theme = await prisma.menuTheme.upsert({
+        where: { restaurantId },
+        update: template,
+        create: {
+          ...defaultThemeWithoutId,
+          ...template,
+          restaurantId,
+        },
+      });
 
       res.json({
         success: true,

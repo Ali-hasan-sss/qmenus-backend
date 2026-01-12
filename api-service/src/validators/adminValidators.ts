@@ -140,7 +140,7 @@ export const updatePlanSchema = Joi.object({
 });
 
 export const createUserSchema = Joi.object({
-  email: Joi.string().email().required().messages({
+  email: Joi.string().email().required().trim().lowercase().messages({
     "string.email": "Please provide a valid email address",
     "any.required": "Email is required",
   }),
@@ -187,7 +187,7 @@ export const createUserSchema = Joi.object({
 });
 
 export const updateUserSchema = Joi.object({
-  email: Joi.string().email().optional().messages({
+  email: Joi.string().email().optional().trim().lowercase().messages({
     "string.email": "Please provide a valid email address",
   }),
   firstName: Joi.string().min(2).max(50).optional().messages({

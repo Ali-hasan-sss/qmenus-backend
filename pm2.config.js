@@ -17,6 +17,10 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
+      // Log rotation settings
+      max_size: "10M", // Rotate when log file reaches 10MB
+      retain: 7, // Keep 7 rotated log files
+      compress: true, // Compress rotated logs
     },
     {
       name: "socket-service",
@@ -36,6 +40,10 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
+      // Log rotation settings
+      max_size: "10M", // Rotate when log file reaches 10MB
+      retain: 7, // Keep 7 rotated log files
+      compress: true, // Compress rotated logs
     },
     {
       name: "jobs-service",
@@ -55,6 +63,10 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
+      // Log rotation settings
+      max_size: "10M", // Rotate when log file reaches 10MB
+      retain: 7, // Keep 7 rotated log files
+      compress: true, // Compress rotated logs
     },
   ],
 };

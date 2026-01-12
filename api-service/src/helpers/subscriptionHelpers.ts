@@ -76,11 +76,52 @@ export async function createNotificationByRole(
             body,
             type: type as any,
           },
+          include: {
+            restaurant:
+              role === "ADMIN" && restaurantId
+                ? {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  }
+                : false,
+          },
         })
       )
     );
 
     console.log(`✅ ${role} notifications sent to ${users.length} users`);
+
+    // Send real-time notifications via socket-service for ADMIN role
+    if (role === "ADMIN" && notifications.length > 0) {
+      try {
+        const axios = require("axios");
+        const env = require("../../../shared/config/env").env;
+        const socketServiceUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
+
+        // Send each notification to its admin user via socket
+        for (const notification of notifications) {
+          await axios.post(`${socketServiceUrl}/api/emit-admin-notification`, {
+            notification,
+            adminIds: [notification.userId],
+          });
+        }
+
+        console.log(
+          `✅ Sent ${notifications.length} real-time admin notifications via socket`
+        );
+      } catch (socketError: any) {
+        console.error(
+          "⚠️ Socket admin notification error:",
+          socketError?.message || socketError
+        );
+        // Continue anyway - notifications are saved in DB
+      }
+    }
+
     return notifications;
   } catch (error) {
     console.error(`Error creating ${role} notifications:`, error);
@@ -198,11 +239,31 @@ export async function checkExpiredSubscriptions() {
     let updatedCount = 0;
 
     for (const subscription of expiredSubscriptions) {
+      // Check if restaurant has any other active subscriptions
+      const hasOtherActiveSubscription = await prisma.subscription.findFirst({
+        where: {
+          restaurantId: subscription.restaurantId,
+          status: "ACTIVE",
+          id: { not: subscription.id },
+        },
+      });
+
       // Update subscription status to EXPIRED
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: { status: "EXPIRED" },
       });
+
+      // Deactivate restaurant if no other active subscriptions exist
+      if (!hasOtherActiveSubscription) {
+        await prisma.restaurant.update({
+          where: { id: subscription.restaurantId },
+          data: { isActive: false },
+        });
+        console.log(
+          `🔒 Restaurant ${subscription.restaurant.name} (${subscription.restaurantId}) deactivated due to expired subscription`
+        );
+      }
 
       // Send notification to restaurant owner
       await createNotification(

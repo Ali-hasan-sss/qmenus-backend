@@ -18,6 +18,7 @@ import {
   generateKitchenWhatsAppMessage,
   generateWhatsAppURL,
 } from "../helpers/whatsappHelper";
+import * as XLSX from "xlsx";
 
 // Helper function to extract extras names for notes
 const getExtrasNamesForNotes = (
@@ -370,15 +371,20 @@ router.post(
         },
       });
 
+      // Check if this is a quick order (created by cashier)
+      const isQuickOrder = tableNumber === "QUICK";
+
       // Create notification for new order
-      const notificationTitle =
-        orderType === "DINE_IN"
-          ? `New Order - Table ${tableNumber}`
-          : `New Delivery Order`;
-      const notificationBody =
-        orderType === "DINE_IN"
-          ? `New dine-in order received for table ${tableNumber}. ${items.length} items ordered.`
-          : `New delivery order from ${customerName}. ${items.length} items ordered.`;
+      const notificationTitle = isQuickOrder
+        ? `Quick Order - Cashier`
+        : orderType === "DINE_IN"
+        ? `New Order - Table ${tableNumber}`
+        : `New Delivery Order`;
+      const notificationBody = isQuickOrder
+        ? `Quick order created by cashier. ${items.length} items ordered.`
+        : orderType === "DINE_IN"
+        ? `New dine-in order received for table ${tableNumber}. ${items.length} items ordered.`
+        : `New delivery order from ${customerName}. ${items.length} items ordered.`;
 
       const notification = await prisma.notification.create({
         data: {
@@ -398,15 +404,17 @@ router.post(
           `http://localhost:${env.SOCKET_PORT || "5001"}`;
         await axios.post(`${baseUrl}/api/emit-order-update`, {
           order,
-          updatedBy: "customer",
+          updatedBy: isQuickOrder ? "restaurant" : "customer",
           timestamp: new Date().toISOString(),
           restaurantId,
           qrCodeId: order.qrCodeId,
         });
 
-        // Also emit KDS update with source "customer" to trigger visual/audio effects
+        // Also emit KDS update to trigger visual/audio effects
         console.log(
-          `📤 Sending KDS update with source: customer for new order ${order.id}`
+          `📤 Sending KDS update with source: ${
+            isQuickOrder ? "restaurant" : "customer"
+          } for new order ${order.id}`
         );
         await axios.post(`${baseUrl}/api/emit-kds-update`, {
           orderItem: {
@@ -415,10 +423,14 @@ router.post(
           },
           restaurantId: restaurantId,
           timestamp: new Date().toISOString(),
-          source: "customer", // Indicate this is from customer creating new order
+          source: isQuickOrder ? "restaurant" : "customer", // Indicate source of order
           orderId: order.id,
         });
-        console.log(`✅ KDS update sent with source: customer for new order`);
+        console.log(
+          `✅ KDS update sent with source: ${
+            isQuickOrder ? "restaurant" : "customer"
+          } for new order`
+        );
       } catch (socketError: any) {
         console.error(
           "⚠️ Socket notification error (create):",
@@ -721,6 +733,564 @@ router.get(
       });
     } catch (error) {
       console.error("Get orders error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Export daily report (Excel) - Must be before /:id route
+router.get(
+  "/export-daily-report",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+      const lang = (req.query.lang as string) || "ar";
+      const isArabic = lang === "ar";
+
+      // Get restaurant info
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: {
+          name: true,
+          nameAr: true,
+          currency: true,
+        },
+      });
+
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          message: isArabic ? "المطعم غير موجود" : "Restaurant not found",
+        });
+      }
+
+      // Get today's date range (start and end of day)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      // Calculate total revenue using aggregate (more memory efficient)
+      const revenueResult = await prisma.order.aggregate({
+        where: {
+          restaurantId,
+          status: "COMPLETED",
+          createdAt: {
+            gte: today,
+            lt: tomorrow,
+          },
+        },
+        _sum: {
+          totalPrice: true,
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      const totalRevenue = Number(revenueResult._sum.totalPrice || 0);
+      const ordersCount = revenueResult._count.id;
+
+      // Get completed orders for today with limited fields to reduce memory usage
+      // Use select instead of include to only get needed fields
+      const orders = await prisma.order.findMany({
+        where: {
+          restaurantId,
+          status: "COMPLETED",
+          createdAt: {
+            gte: today,
+            lt: tomorrow,
+          },
+        },
+        select: {
+          id: true,
+          orderType: true,
+          tableNumber: true,
+          customerName: true,
+          totalPrice: true,
+          currency: true,
+          createdAt: true,
+          items: {
+            select: {
+              quantity: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        // Add a reasonable limit to prevent memory issues (10,000 orders max per day)
+        take: 10000,
+      });
+
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+
+      // Prepare data for orders sheet
+      const ordersData = [
+        // Header row
+        isArabic
+          ? [
+              "رقم الطلب",
+              "نوع الطلب",
+              "الطاولة/العميل",
+              "عدد العناصر",
+              "المجموع",
+              "العملة",
+              "التاريخ",
+              "الوقت",
+            ]
+          : [
+              "Order ID",
+              "Order Type",
+              "Table/Customer",
+              "Items Count",
+              "Total",
+              "Currency",
+              "Date",
+              "Time",
+            ],
+      ];
+
+      // Add order rows
+      orders.forEach((order: any) => {
+        const orderDate = new Date(order.createdAt);
+        const dateStr = orderDate.toLocaleDateString("ar-SA", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const timeStr = orderDate.toLocaleTimeString("ar-SA", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        const orderType =
+          order.orderType === "DINE_IN"
+            ? isArabic
+              ? "داخل المطعم"
+              : "Dine-in"
+            : isArabic
+            ? "توصيل"
+            : "Delivery";
+
+        const tableOrCustomer = order.tableNumber
+          ? `${isArabic ? "طاولة" : "Table"} ${order.tableNumber}`
+          : order.customerName || "-";
+
+        // Calculate total items quantity
+        const itemsCount = order.items.reduce(
+          (sum: number, item: any) => sum + item.quantity,
+          0
+        );
+
+        ordersData.push([
+          `#${order.id.slice(-8)}`,
+          orderType,
+          tableOrCustomer,
+          itemsCount,
+          Number(order.totalPrice),
+          order.currency || restaurant.currency,
+          dateStr,
+          timeStr,
+        ]);
+      });
+
+      // Add total row at the end
+      ordersData.push([
+        "", // Order ID - empty
+        isArabic ? "المجموع" : "TOTAL", // Order Type - shows "TOTAL" label
+        "", // Table/Customer - empty
+        "", // Items Count - empty
+        totalRevenue, // Total - sum of all orders
+        restaurant.currency || "USD", // Currency
+        "", // Date - empty
+        "", // Time - empty
+      ]);
+
+      // Create orders worksheet
+      const ordersWorksheet = XLSX.utils.aoa_to_sheet(ordersData);
+
+      // Set column widths
+      ordersWorksheet["!cols"] = [
+        { wch: 12 }, // Order ID
+        { wch: 15 }, // Order Type
+        { wch: 20 }, // Table/Customer
+        { wch: 12 }, // Items Count
+        { wch: 15 }, // Total
+        { wch: 10 }, // Currency
+        { wch: 12 }, // Date
+        { wch: 10 }, // Time
+      ];
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        ordersWorksheet,
+        isArabic ? "الطلبات" : "Orders"
+      );
+
+      // Create summary sheet
+      const summaryData = [
+        // Header
+        isArabic ? ["ملخص التقرير اليومي", ""] : ["Daily Report Summary", ""],
+        [isArabic ? "التاريخ" : "Date", today.toLocaleDateString("ar-SA")],
+        [
+          isArabic ? "اسم المطعم" : "Restaurant Name",
+          isArabic ? restaurant.nameAr || restaurant.name : restaurant.name,
+        ],
+        [isArabic ? "عدد الطلبات" : "Total Orders", ordersCount],
+        [isArabic ? "إجمالي الإيرادات" : "Total Revenue", totalRevenue],
+        [isArabic ? "العملة" : "Currency", restaurant.currency || "USD"],
+        [""], // Empty row
+        [
+          isArabic
+            ? "ملاحظة: هذا التقرير يحتوي على الطلبات المكتملة فقط"
+            : "Note: This report contains only completed orders",
+          "",
+        ],
+      ];
+
+      const summaryWorksheet = XLSX.utils.aoa_to_sheet(summaryData);
+      summaryWorksheet["!cols"] = [{ wch: 30 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(
+        workbook,
+        summaryWorksheet,
+        isArabic ? "الملخص" : "Summary"
+      );
+
+      // Generate Excel file buffer
+      const excelBuffer = XLSX.write(workbook, {
+        type: "buffer",
+        bookType: "xlsx",
+      });
+
+      // Generate filename with date
+      const dateStr = today.toISOString().split("T")[0];
+      const filenameEn = `daily_report_${dateStr}.xlsx`;
+      const filenameAr = `تقرير_يومي_${dateStr}.xlsx`;
+
+      // Use RFC 5987 encoding for UTF-8 filenames
+      // This allows Arabic characters in the filename
+      const encodedFilenameAr = encodeURIComponent(filenameAr);
+      const contentDisposition = isArabic
+        ? `attachment; filename="${filenameEn}"; filename*=UTF-8''${encodedFilenameAr}`
+        : `attachment; filename="${filenameEn}"`;
+
+      // Set response headers
+      res.setHeader("Content-Disposition", contentDisposition);
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+
+      res.send(excelBuffer);
+    } catch (error) {
+      console.error("Export daily report error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Export custom time range report (Excel) - Must be before /:id route
+router.post(
+  "/export-custom-report",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+      const { startDate, endDate, lang } = req.body;
+      const isArabic = (lang || "ar") === "ar";
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          message: isArabic
+            ? "يجب تحديد تاريخ ووقت البداية والنهاية"
+            : "Start date and end date are required",
+        });
+      }
+
+      // Parse dates
+      const startDateTime = new Date(startDate);
+      const endDateTime = new Date(endDate);
+
+      if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: isArabic
+            ? "تاريخ أو وقت غير صحيح"
+            : "Invalid date or time format",
+        });
+      }
+
+      if (startDateTime >= endDateTime) {
+        return res.status(400).json({
+          success: false,
+          message: isArabic
+            ? "تاريخ البداية يجب أن يكون قبل تاريخ النهاية"
+            : "Start date must be before end date",
+        });
+      }
+
+      // Get restaurant info
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: {
+          name: true,
+          nameAr: true,
+          currency: true,
+        },
+      });
+
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          message: isArabic ? "المطعم غير موجود" : "Restaurant not found",
+        });
+      }
+
+      // Calculate total revenue using aggregate (more memory efficient)
+      const revenueResult = await prisma.order.aggregate({
+        where: {
+          restaurantId,
+          status: "COMPLETED",
+          createdAt: {
+            gte: startDateTime,
+            lte: endDateTime,
+          },
+        },
+        _sum: {
+          totalPrice: true,
+        },
+        _count: {
+          id: true,
+        },
+      });
+
+      const totalRevenue = Number(revenueResult._sum.totalPrice || 0);
+      const ordersCount = revenueResult._count.id;
+
+      // Get completed orders for the time range with limited fields to reduce memory usage
+      const orders = await prisma.order.findMany({
+        where: {
+          restaurantId,
+          status: "COMPLETED",
+          createdAt: {
+            gte: startDateTime,
+            lte: endDateTime,
+          },
+        },
+        select: {
+          id: true,
+          orderType: true,
+          tableNumber: true,
+          customerName: true,
+          totalPrice: true,
+          currency: true,
+          createdAt: true,
+          items: {
+            select: {
+              quantity: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        take: 10000, // Limit to prevent memory issues
+      });
+
+      // Create workbook
+      const workbook = XLSX.utils.book_new();
+
+      // Prepare data for orders sheet
+      const ordersData = [
+        // Header row
+        isArabic
+          ? [
+              "رقم الطلب",
+              "نوع الطلب",
+              "الطاولة/العميل",
+              "عدد العناصر",
+              "المجموع",
+              "العملة",
+              "التاريخ",
+              "الوقت",
+            ]
+          : [
+              "Order ID",
+              "Order Type",
+              "Table/Customer",
+              "Items Count",
+              "Total",
+              "Currency",
+              "Date",
+              "Time",
+            ],
+      ];
+
+      // Add order rows
+      orders.forEach((order: any) => {
+        const orderDate = new Date(order.createdAt);
+        const dateStr = orderDate.toLocaleDateString("ar-SA", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const timeStr = orderDate.toLocaleTimeString("ar-SA", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        const orderType =
+          order.orderType === "DINE_IN"
+            ? isArabic
+              ? "داخل المطعم"
+              : "Dine-in"
+            : isArabic
+            ? "توصيل"
+            : "Delivery";
+
+        const tableOrCustomer = order.tableNumber
+          ? `${isArabic ? "طاولة" : "Table"} ${order.tableNumber}`
+          : order.customerName || "-";
+
+        // Calculate total items quantity
+        const itemsCount = order.items.reduce(
+          (sum: number, item: any) => sum + item.quantity,
+          0
+        );
+
+        ordersData.push([
+          `#${order.id.slice(-8)}`,
+          orderType,
+          tableOrCustomer,
+          itemsCount,
+          Number(order.totalPrice),
+          order.currency || restaurant.currency,
+          dateStr,
+          timeStr,
+        ]);
+      });
+
+      // Add total row at the end
+      ordersData.push([
+        "", // Order ID - empty
+        isArabic ? "المجموع" : "TOTAL", // Order Type - shows "TOTAL" label
+        "", // Table/Customer - empty
+        "", // Items Count - empty
+        totalRevenue, // Total - sum of all orders
+        restaurant.currency || "USD", // Currency
+        "", // Date - empty
+        "", // Time - empty
+      ]);
+
+      // Create orders worksheet
+      const ordersWorksheet = XLSX.utils.aoa_to_sheet(ordersData);
+
+      // Set column widths
+      ordersWorksheet["!cols"] = [
+        { wch: 12 }, // Order ID
+        { wch: 15 }, // Order Type
+        { wch: 20 }, // Table/Customer
+        { wch: 12 }, // Items Count
+        { wch: 15 }, // Total
+        { wch: 10 }, // Currency
+        { wch: 12 }, // Date
+        { wch: 10 }, // Time
+      ];
+
+      XLSX.utils.book_append_sheet(
+        workbook,
+        ordersWorksheet,
+        isArabic ? "الطلبات" : "Orders"
+      );
+
+      // Create summary sheet
+      const summaryData = [
+        // Header
+        isArabic ? ["ملخص التقرير", ""] : ["Report Summary", ""],
+        [
+          isArabic ? "من" : "From",
+          startDateTime.toLocaleString("ar-SA", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        ],
+        [
+          isArabic ? "إلى" : "To",
+          endDateTime.toLocaleString("ar-SA", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        ],
+        [
+          isArabic ? "اسم المطعم" : "Restaurant Name",
+          isArabic ? restaurant.nameAr || restaurant.name : restaurant.name,
+        ],
+        [isArabic ? "عدد الطلبات" : "Total Orders", ordersCount],
+        [isArabic ? "إجمالي الإيرادات" : "Total Revenue", totalRevenue],
+        [isArabic ? "العملة" : "Currency", restaurant.currency || "USD"],
+        [""], // Empty row
+        [
+          isArabic
+            ? "ملاحظة: هذا التقرير يحتوي على الطلبات المكتملة فقط"
+            : "Note: This report contains only completed orders",
+          "",
+        ],
+      ];
+
+      const summaryWorksheet = XLSX.utils.aoa_to_sheet(summaryData);
+      summaryWorksheet["!cols"] = [{ wch: 30 }, { wch: 20 }];
+      XLSX.utils.book_append_sheet(
+        workbook,
+        summaryWorksheet,
+        isArabic ? "الملخص" : "Summary"
+      );
+
+      // Generate Excel file buffer
+      const excelBuffer = XLSX.write(workbook, {
+        type: "buffer",
+        bookType: "xlsx",
+      });
+
+      // Generate filename with date range
+      const startDateStr = startDateTime.toISOString().split("T")[0];
+      const endDateStr = endDateTime.toISOString().split("T")[0];
+      const filenameEn = `custom_report_${startDateStr}_to_${endDateStr}.xlsx`;
+      const filenameAr = `تقرير_${startDateStr}_إلى_${endDateStr}.xlsx`;
+
+      // Use RFC 5987 encoding for UTF-8 filenames
+      const encodedFilenameAr = encodeURIComponent(filenameAr);
+      const contentDisposition = isArabic
+        ? `attachment; filename="${filenameEn}"; filename*=UTF-8''${encodedFilenameAr}`
+        : `attachment; filename="${filenameEn}"`;
+
+      // Set response headers
+      res.setHeader("Content-Disposition", contentDisposition);
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+
+      res.send(excelBuffer);
+    } catch (error) {
+      console.error("Export custom report error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",
@@ -1253,28 +1823,31 @@ router.put(
       });
 
       // Notify socket-service via HTTP for real-time broadcast
-      // Don't send order_update for COMPLETED or CANCELLED orders to avoid notifications at cashier
-      // Only send updates for status changes that are not final states
       try {
         const axios = require("axios");
         const baseUrl =
           env.SOCKET_SERVICE_URL ||
           `http://localhost:${env.SOCKET_PORT || "5001"}`;
 
-        // Only send order_update if status is not COMPLETED or CANCELLED
-        // This prevents notifications at cashier when order is completed
-        if (status !== "CANCELLED" && status !== "COMPLETED") {
-          await axios.post(`${baseUrl}/api/emit-order-update`, {
-            order: updatedOrder,
-            updatedBy: "restaurant",
-            timestamp: new Date().toISOString(),
-            restaurantId: restaurantId,
-            qrCodeId: updatedOrder.qrCodeId,
-          });
-        }
-
-        // If order is cancelled or completed, notify KDS to remove items from display
+        // Send order_update to customer (table room) even for COMPLETED/CANCELLED
+        // But skip restaurant room to prevent notifications at cashier
         if (status === "CANCELLED" || status === "COMPLETED") {
+          // Send update to customer only (skip restaurant room to avoid cashier notifications)
+          if (updatedOrder.qrCodeId) {
+            await axios.post(`${baseUrl}/api/emit-order-update`, {
+              order: updatedOrder,
+              updatedBy: "restaurant",
+              timestamp: new Date().toISOString(),
+              restaurantId: restaurantId,
+              qrCodeId: updatedOrder.qrCodeId,
+              skipRestaurantRoom: true, // Skip restaurant room to prevent cashier notifications
+            });
+            console.log(
+              `✅ Order ${id} ${status}, order update sent to customer (table_${updatedOrder.qrCodeId}) only`
+            );
+          }
+
+          // Notify KDS to remove items from display
           await axios.post(`${baseUrl}/api/emit-kds-update`, {
             orderItem: null, // Signal to refresh all items
             restaurantId,
@@ -1285,9 +1858,15 @@ router.put(
           console.log(
             `✅ Order ${id} ${status}, KDS update sent to remove items from display`
           );
-          console.log(
-            `🔇 Order ${id} ${status}, skipping order_update to prevent cashier notifications`
-          );
+        } else {
+          // For non-final statuses, send update to both customer and cashier
+          await axios.post(`${baseUrl}/api/emit-order-update`, {
+            order: updatedOrder,
+            updatedBy: "restaurant",
+            timestamp: new Date().toISOString(),
+            restaurantId: restaurantId,
+            qrCodeId: updatedOrder.qrCodeId,
+          });
         }
       } catch (socketError: any) {
         console.error(

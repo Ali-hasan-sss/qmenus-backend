@@ -32,35 +32,36 @@ model User {
 }
 
 model Restaurant {
-  id              String              @id @default(cuid())
-  name            String
-  nameAr          String?
-  description     String?
-  descriptionAr   String?
-  logo            String?
-  address         String?
-  phone           String?
-  email           String?
-  website         String?
-  currency        String              @default("USD")
-  isActive        Boolean             @default(true)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  ownerId         String
-  kitchenWhatsApp String?
-  categories      Category[]
-  invoices        Invoice[]
-  menu_items      MenuItem[]
-  menuTheme       MenuTheme?
-  menus           Menu[]
-  notifications   Notification[]
-  orders          Order[]
-  qrCodes         QRCode[]
-  theme           RestaurantTheme?
-  settings        RestaurantSettings?
-  owner           User                @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  subscriptions   Subscription[]
-  kitchenSections KitchenSection[]
+  id                String              @id @default(cuid())
+  name              String
+  nameAr            String?
+  description       String?
+  descriptionAr     String?
+  logo              String?
+  address           String?
+  phone             String?
+  email             String?
+  website           String?
+  currency          String              @default("USD")
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  ownerId           String
+  kitchenWhatsApp   String?
+  categories        Category[]
+  invoices          Invoice[]
+  menu_items        MenuItem[]
+  menuTheme         MenuTheme?
+  menus             Menu[]
+  notifications     Notification[]
+  orders            Order[]
+  qrCodes           QRCode[]
+  theme             RestaurantTheme?
+  settings          RestaurantSettings?
+  currencyExchanges CurrencyExchange[]
+  owner             User                @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  subscriptions     Subscription[]
+  kitchenSections   KitchenSection[]
 
   @@map("restaurants")
 }
@@ -267,6 +268,21 @@ model RestaurantSettings {
   restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@map("restaurant_settings")
+}
+
+model CurrencyExchange {
+  id           String     @id @default(cuid())
+  currency     String // Currency code (e.g., "EUR", "GBP", "SYP")
+  exchangeRate Decimal    @db.Decimal(20, 6) // Rate to convert from this currency to restaurant's base currency
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, currency])
+  @@index([restaurantId])
+  @@map("currency_exchanges")
 }
 
 model Gallery {

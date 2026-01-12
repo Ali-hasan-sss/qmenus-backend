@@ -113,9 +113,11 @@ export const setupSocketHandlers = (io: Server) => {
           return;
         }
 
+        // Join both specific admin room and admin_all room
         socket.join(`admin_${adminId}`);
+        socket.join("admin_all");
         console.log(
-          `[socket-service] Socket ${socket.id} joined admin ${adminId}`
+          `[socket-service] Socket ${socket.id} joined admin ${adminId} and admin_all`
         );
 
         socket.emit("joined_admin", {
@@ -416,27 +418,32 @@ export const setupSocketHandlers = (io: Server) => {
 
         console.log(`[socket-service] Order created: ${order.id}`);
 
-        // Emit success to the customer
+        // Check if this is a quick order (created by cashier)
+        const isQuickOrder = order.tableNumber === "QUICK";
+
+        // Emit success to the customer (always emit for UI updates)
         socket.emit("order_created", {
           order,
           message: "Order created successfully",
         });
 
-        // Broadcast to restaurant room
+        // Broadcast to restaurant room (including quick orders)
         io.to(`restaurant_${restaurantId}`).emit("new_order", {
           order,
-          message: "New order received",
+          message: isQuickOrder ? "Quick order received" : "New order received",
         });
 
         // Also emit to admin if exists
         io.to("admin_all").emit("new_order", {
           order,
-          message: "New order received",
+          message: isQuickOrder ? "Quick order received" : "New order received",
         });
 
-        // Emit KDS update with source "customer" to trigger visual/audio effects
+        // Emit KDS update to trigger visual/audio effects
         console.log(
-          `📤 [Socket] Sending KDS update with source: customer for new order ${order.id}`
+          `📤 [Socket] Sending KDS update with source: ${
+            isQuickOrder ? "restaurant" : "customer"
+          } for new order ${order.id}`
         );
         io.to(`restaurant_${restaurantId}`).emit("kds_update", {
           orderItem: {
@@ -445,11 +452,13 @@ export const setupSocketHandlers = (io: Server) => {
           },
           restaurantId: restaurantId,
           timestamp: new Date().toISOString(),
-          source: "customer", // Indicate this is from customer creating new order
+          source: isQuickOrder ? "restaurant" : "customer", // Indicate source of order
           orderId: order.id,
         });
         console.log(
-          `✅ [Socket] KDS update sent with source: customer for new order`
+          `✅ [Socket] KDS update sent with source: ${
+            isQuickOrder ? "restaurant" : "customer"
+          } for new order`
         );
       } catch (error: any) {
         console.error("[socket-service] Create order error:", error);

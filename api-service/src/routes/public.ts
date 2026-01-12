@@ -640,4 +640,54 @@ router.get("/health", (req, res) => {
   });
 });
 
+// Get currency exchanges for a restaurant (public)
+router.get("/restaurant/:restaurantId/currency-exchanges", async (req, res): Promise<any> => {
+  try {
+    const { restaurantId } = req.params;
+
+    // Verify restaurant exists and is active
+    const restaurant = await prisma.restaurant.findFirst({
+      where: {
+        id: restaurantId,
+        isActive: true,
+      },
+    });
+
+    if (!restaurant) {
+      return res.status(404).json({
+        success: false,
+        message: "Restaurant not found",
+      });
+    }
+
+    // Get active currency exchanges
+    const currencyExchanges = await prisma.currencyExchange.findMany({
+      where: {
+        restaurantId,
+        isActive: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        id: true,
+        currency: true,
+        exchangeRate: true,
+        isActive: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      data: currencyExchanges,
+    });
+  } catch (error) {
+    console.error("Get currency exchanges error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
 export default router;

@@ -38,7 +38,7 @@ export const registerUser = async (
 ): Promise<any> => {
   try {
     const {
-      email,
+      email: rawEmail,
       password,
       firstName,
       lastName,
@@ -49,6 +49,9 @@ export const registerUser = async (
       restaurantDescriptionAr,
       logo,
     } = req.body;
+
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
     // Check if user already exists
     const existingUser = await prisma.user.findUnique({
@@ -325,7 +328,10 @@ export const loginUser = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email, password } = req.body;
+    const { email: rawEmail, password } = req.body;
+
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
     // Find user with restaurant data
     const user = await prisma.user.findUnique({
@@ -646,7 +652,9 @@ router.put(
   validateRequest(updateProfileSchema),
   async (req: AuthRequest, res: Response): Promise<any> => {
     try {
-      const { firstName, lastName, email } = req.body;
+      const { firstName, lastName, email: rawEmail } = req.body;
+      // Normalize email: convert to lowercase and trim whitespace
+      const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
       // Check if email is already taken by another user
       const existingUser = await prisma.user.findFirst({
@@ -794,7 +802,10 @@ export const verifyEmail = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email, verificationCode } = req.body;
+    const { email: rawEmail, verificationCode } = req.body;
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
+
     // Find pending email verification record
     const pending = await prisma.emailVerification.findUnique({
       where: { email },
@@ -857,7 +868,9 @@ export const resendVerificationCode = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email, firstName } = req.body;
+    const { email: rawEmail, firstName } = req.body;
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
     // Enforce 10-minute cooldown from last update
     const existing = await prisma.emailVerification.findUnique({
@@ -918,7 +931,9 @@ export const forgotPassword = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email } = req.body;
+    const { email: rawEmail } = req.body;
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -984,7 +999,9 @@ export const resetPassword = async (
   res: Response
 ): Promise<any> => {
   try {
-    const { email, resetCode, newPassword } = req.body;
+    const { email: rawEmail, resetCode, newPassword } = req.body;
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
     // Find user
     const user = await prisma.user.findUnique({

@@ -11,6 +11,8 @@
     "delete": "pm2 delete pm2.config.js",
     "logs": "pm2 logs",
     "status": "pm2 status",
+    "cleanup-logs": "bash scripts/cleanup-logs.sh",
+    "cleanup-logs:win": "powershell -File scripts/cleanup-logs.ps1",
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:socket\" \"npm run dev:jobs\"",
     "dev:api": "cd api-service && npm run dev",
     "dev:socket": "cd socket-service && npm run dev",

@@ -97,14 +97,13 @@ router.get(
         ? [
             "اسم الفئة", // category_name
             "اسم الفئة بالعربية", // category_name_ar
-            "وصف الفئة", // category_description
-            "وصف الفئة بالعربية", // category_description_ar
+            "وصف الفئة (اختياري)", // category_description
+            "وصف الفئة بالعربية (اختياري)", // category_description_ar
             "اسم العنصر", // item_name
             "اسم العنصر بالعربية", // item_name_ar
-            "وصف العنصر", // item_description
-            "وصف العنصر بالعربية", // item_description_ar
+            "وصف العنصر (اختياري)", // item_description
+            "وصف العنصر بالعربية (اختياري)", // item_description_ar
             "السعر", // item_price
-            "العملة (SYP / USD)", // item_currency
             "الخصم (%)", // item_discount
             "الإضافات (مفصولة بـ /)", // extras
             "أسعار الإضافات (مفصولة بـ /)", // extras_prices
@@ -112,14 +111,13 @@ router.get(
         : [
             "Category Name", // category_name
             "Category Name (Arabic)", // category_name_ar
-            "Category Description", // category_description
-            "Category Description (Arabic)", // category_description_ar
+            "Category Description (Optional)", // category_description
+            "Category Description (Arabic) (Optional)", // category_description_ar
             "Item Name", // item_name
             "Item Name (Arabic)", // item_name_ar
-            "Item Description", // item_description
-            "Item Description (Arabic)", // item_description_ar
+            "Item Description (Optional)", // item_description
+            "Item Description (Arabic) (Optional)", // item_description_ar
             "Price", // item_price
-            "Currency (SYP / USD)", // item_currency
             "Discount (%)", // item_discount
             "Extras (separated by /)", // extras
             "Extras Prices (separated by /)", // extras_prices
@@ -136,7 +134,6 @@ router.get(
         "item_description",
         "item_description_ar",
         "item_price",
-        "item_currency",
         "item_discount",
         "extras",
         "extras_prices",
@@ -157,7 +154,6 @@ router.get(
           "Creamy hummus with tahini and olive oil",
           "حمص كريمي مع الطحينة وزيت الزيتون",
           15000,
-          "SYP",
           0,
           "Extra Bread / Extra Tahini",
           "3000 / 2000",
@@ -172,7 +168,6 @@ router.get(
           "Authentic Lebanese moutabal",
           "متبل لبناني أصلي",
           15000,
-          "SYP",
           10,
           "Extra Bread",
           "3000",
@@ -186,14 +181,13 @@ router.get(
       const columnWidths = [
         { wch: 20 }, // category_name
         { wch: 20 }, // category_name_ar
-        { wch: 30 }, // category_description
-        { wch: 30 }, // category_description_ar
+        { wch: 35 }, // category_description (Optional)
+        { wch: 35 }, // category_description_ar (Optional)
         { wch: 25 }, // item_name
         { wch: 25 }, // item_name_ar
-        { wch: 40 }, // item_description
-        { wch: 40 }, // item_description_ar
+        { wch: 45 }, // item_description (Optional)
+        { wch: 45 }, // item_description_ar (Optional)
         { wch: 12 }, // item_price
-        { wch: 10 }, // item_currency
         { wch: 12 }, // item_discount
         { wch: 30 }, // extras
         { wch: 20 }, // extras_prices
@@ -279,14 +273,16 @@ router.post(
         "Category Name": "category_name",
         "Category Name (Arabic)": "category_name_ar",
         "Category Description": "category_description",
+        "Category Description (Optional)": "category_description",
         "Category Description (Arabic)": "category_description_ar",
+        "Category Description (Arabic) (Optional)": "category_description_ar",
         "Item Name": "item_name",
         "Item Name (Arabic)": "item_name_ar",
         "Item Description": "item_description",
+        "Item Description (Optional)": "item_description",
         "Item Description (Arabic)": "item_description_ar",
+        "Item Description (Arabic) (Optional)": "item_description_ar",
         Price: "item_price",
-        Currency: "item_currency",
-        "Currency (SYP / USD)": "item_currency",
         "Discount (%)": "item_discount",
         "Extras (separated by /)": "extras",
         "Extras Prices (separated by /)": "extras_prices",
@@ -294,14 +290,16 @@ router.post(
         "اسم الفئة": "category_name",
         "اسم الفئة بالعربية": "category_name_ar",
         "وصف الفئة": "category_description",
+        "وصف الفئة (اختياري)": "category_description",
         "وصف الفئة بالعربية": "category_description_ar",
+        "وصف الفئة بالعربية (اختياري)": "category_description_ar",
         "اسم العنصر": "item_name",
         "اسم العنصر بالعربية": "item_name_ar",
         "وصف العنصر": "item_description",
+        "وصف العنصر (اختياري)": "item_description",
         "وصف العنصر بالعربية": "item_description_ar",
+        "وصف العنصر بالعربية (اختياري)": "item_description_ar",
         السعر: "item_price",
-        العملة: "item_currency",
-        "العملة (SYP / USD)": "item_currency",
         "الخصم (%)": "item_discount",
         "الإضافات (مفصولة بـ /)": "extras",
         "أسعار الإضافات (مفصولة بـ /)": "extras_prices",
@@ -312,7 +310,7 @@ router.post(
         (header) => headerMapping[header] || header
       );
 
-      // Validate that all required keys are present
+      // Validate that required keys are present
       const requiredKeys = ["category_name", "item_name", "item_price"];
 
       const missingKeys = requiredKeys.filter((key) => !headers.includes(key));
@@ -331,6 +329,7 @@ router.post(
             "item_description",
             "item_description_ar",
             "item_price",
+            "item_currency",
             "item_discount",
             "extras",
             "extras_prices",
@@ -370,9 +369,10 @@ router.post(
           continue; // Skip invalid rows
         }
 
-        const categoryKey = `${rowData.category_name}_${
-          rowData.category_name_ar || ""
-        }`;
+        // Handle category (required)
+        const categoryName = String(rowData.category_name || "").trim();
+        const categoryKey = `${categoryName}_${rowData.category_name_ar || ""}`;
+
         const itemKey = `${categoryKey}_${rowData.item_name}_${
           rowData.item_name_ar || ""
         }`;
@@ -380,7 +380,7 @@ router.post(
         // Store category data
         if (!categories.has(categoryKey)) {
           categories.set(categoryKey, {
-            name: rowData.category_name,
+            name: categoryName,
             nameAr: rowData.category_name_ar || null,
             description: rowData.category_description || null,
             descriptionAr: rowData.category_description_ar || null,
@@ -417,14 +417,16 @@ router.post(
             }
           }
 
+          // Parse price (required)
+          const priceValue = parseFloat(String(rowData.item_price || 0));
+
           items.set(itemKey, {
             categoryKey,
             name: rowData.item_name,
             nameAr: rowData.item_name_ar || null,
             description: rowData.item_description || null,
             descriptionAr: rowData.item_description_ar || null,
-            price: parseFloat(rowData.item_price),
-            currency: rowData.item_currency || "USD",
+            price: isNaN(priceValue) ? 0 : priceValue,
             discount: rowData.item_discount
               ? parseInt(rowData.item_discount)
               : 0,
@@ -533,7 +535,12 @@ router.post(
         // Create items
         for (const [itemKey, itemData] of items) {
           const category = categories.get(itemData.categoryKey);
-          if (!category) continue;
+          if (!category) {
+            console.error(
+              `Category not found for item ${itemData.name}, categoryKey: ${itemData.categoryKey}`
+            );
+            continue;
+          }
 
           const item = await tx.menuItem.create({
             data: {
@@ -542,11 +549,12 @@ router.post(
               description: itemData.description,
               descriptionAr: itemData.descriptionAr,
               price: itemData.price,
-              currency: itemData.currency,
               discount: itemData.discount,
               extras: itemData.extras,
               categoryId: category.id,
               restaurantId: restaurantId,
+              // kitchenSectionId is not set from Excel (will be set manually later)
+              // currency is not stored in MenuItem schema (restaurant-level setting)
             },
           });
 

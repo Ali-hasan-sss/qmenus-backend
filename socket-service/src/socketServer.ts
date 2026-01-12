@@ -154,16 +154,20 @@ app.post("/api/emit-kds-update", async (req: Request, res: Response) => {
       });
       console.log(`✅ Emitted kds_update to restaurant_${restaurantId}`);
 
-      // Only emit order_update if source is customer (new items added)
-      if (source === "customer") {
+      // Emit order_update if source is customer or restaurant (new items added)
+      // This ensures both customer orders and quick orders (restaurant) trigger updates
+      if (source === "customer" || source === "restaurant") {
         // Get order from orderItem or fetch it if not included
         const orderData = orderItem?.order;
         if (orderData) {
           io.to(`restaurant_${restaurantId}`).emit("order_update", {
             order: orderData,
-            updatedBy: "customer",
+            updatedBy: source === "restaurant" ? "restaurant" : "customer",
             timestamp: timestamp || new Date().toISOString(),
           });
+          console.log(
+            `✅ Emitted order_update to restaurant_${restaurantId} for ${source} order`
+          );
         }
       }
     }
@@ -215,6 +219,47 @@ app.post("/api/emit-notification", async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: "Failed to emit notification",
+    });
+  }
+});
+
+// HTTP API for emitting admin notifications
+app.post("/api/emit-admin-notification", async (req: Request, res: Response) => {
+  try {
+    const { notification, adminIds } = req.body;
+
+    console.log("📨 Received admin notification emit request:", {
+      notificationId: notification?.id,
+      adminIds: adminIds?.length || 0,
+    });
+
+    if (!notification) {
+      return res.status(400).json({
+        success: false,
+        error: "Notification data is required",
+      });
+    }
+
+    // If specific admin IDs are provided, emit to those admins
+    if (adminIds && Array.isArray(adminIds) && adminIds.length > 0) {
+      for (const adminId of adminIds) {
+        console.log(`🔔 Emitting admin notification to admin_${adminId}...`);
+        io.to(`admin_${adminId}`).emit("new_admin_notification", notification);
+        console.log(`✅ Emitted admin notification to admin_${adminId}`);
+      }
+    } else {
+      // Emit to all admins
+      console.log("🔔 Emitting admin notification to admin_all...");
+      io.to("admin_all").emit("new_admin_notification", notification);
+      console.log("✅ Emitted admin notification to admin_all");
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("❌ Error emitting admin notification:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to emit admin notification",
     });
   }
 });

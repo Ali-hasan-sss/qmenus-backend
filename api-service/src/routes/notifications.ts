@@ -11,7 +11,7 @@ router.get("/", authenticate, async (req: AuthRequest, res): Promise<any> => {
     if (req.user?.role === "ADMIN") {
       return res.json({
         success: true,
-        data: { notifications: [] },
+        data: { notifications: [], pagination: { page: 1, limit: 25, total: 0, pages: 0 } },
       });
     }
 
@@ -23,15 +23,32 @@ router.get("/", authenticate, async (req: AuthRequest, res): Promise<any> => {
       });
     }
 
-    const notifications = await prisma.notification.findMany({
-      where: { restaurantId },
-      orderBy: { createdAt: "desc" },
-      take: 50, // Limit to last 50 notifications
-    });
+    const { page = 1, limit = 25 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [notifications, total] = await Promise.all([
+      prisma.notification.findMany({
+        where: { restaurantId },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.notification.count({
+        where: { restaurantId },
+      }),
+    ]);
 
     res.json({
       success: true,
-      data: { notifications },
+      data: {
+        notifications,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          pages: Math.ceil(total / Number(limit)),
+        },
+      },
     });
   } catch (error) {
     console.error("Error fetching notifications:", error);

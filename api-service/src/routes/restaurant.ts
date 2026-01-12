@@ -76,21 +76,31 @@ router.put(
         email,
         website,
         kitchenWhatsApp,
+        currency,
       } = req.body;
+
+      // Build update data object - only include fields that are provided
+      const updateData: any = {};
+
+      if (name !== undefined) updateData.name = name;
+      if (nameAr !== undefined) updateData.nameAr = nameAr;
+      if (description !== undefined) updateData.description = description;
+      if (descriptionAr !== undefined) updateData.descriptionAr = descriptionAr;
+      if (address !== undefined) updateData.address = address;
+      if (phone !== undefined) updateData.phone = phone;
+      if (email !== undefined) updateData.email = email;
+      if (website !== undefined) updateData.website = website;
+      if (kitchenWhatsApp !== undefined)
+        updateData.kitchenWhatsApp = kitchenWhatsApp;
+
+      // Always update currency if provided
+      if (currency !== undefined && currency !== null && currency !== "") {
+        updateData.currency = currency;
+      }
 
       const updatedRestaurant = await prisma.restaurant.update({
         where: { id: req.user!.restaurantId },
-        data: {
-          name,
-          nameAr,
-          description,
-          descriptionAr,
-          address,
-          phone,
-          email,
-          website,
-          kitchenWhatsApp,
-        },
+        data: updateData,
       });
 
       res.json({
@@ -431,7 +441,8 @@ router.put(
         logo: logo || null,
       };
 
-      if (currency !== undefined) {
+      // Always update currency if provided, otherwise keep existing value
+      if (currency !== undefined && currency !== null && currency !== "") {
         updateData.currency = currency;
       }
 
@@ -565,6 +576,227 @@ router.put(
       });
     } catch (error) {
       console.error("Update restaurant settings error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Get currency exchanges
+router.get(
+  "/currency-exchanges",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId;
+      // For restaurant management, return all currencies (active and inactive)
+      // Frontend will filter active ones when needed
+      const currencyExchanges = await prisma.currencyExchange.findMany({
+        where: {
+          restaurantId,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+      });
+
+      res.json({
+        success: true,
+        data: currencyExchanges,
+      });
+    } catch (error) {
+      console.error("Get currency exchanges error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Create or update currency exchange
+router.post(
+  "/currency-exchanges",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const { currency, exchangeRate } = req.body;
+      const restaurantId = req.user!.restaurantId;
+
+      // Validate required fields
+      if (!currency || !exchangeRate) {
+        return res.status(400).json({
+          success: false,
+          message: "Currency and exchange rate are required",
+        });
+      }
+
+      // Validate exchange rate is positive
+      if (parseFloat(exchangeRate) <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Exchange rate must be greater than 0",
+        });
+      }
+
+      // Get restaurant base currency
+      const restaurant = await prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { currency: true },
+      });
+
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          message: "Restaurant not found",
+        });
+      }
+
+      // Cannot add base currency as exchange
+      if (currency.toUpperCase() === restaurant.currency.toUpperCase()) {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot add base currency as exchange currency",
+        });
+      }
+
+      // Upsert currency exchange
+      const currencyExchange = await prisma.currencyExchange.upsert({
+        where: {
+          restaurantId_currency: {
+            restaurantId,
+            currency: currency.toUpperCase(),
+          },
+        },
+        update: {
+          exchangeRate: parseFloat(exchangeRate),
+          isActive: true,
+        },
+        create: {
+          restaurantId,
+          currency: currency.toUpperCase(),
+          exchangeRate: parseFloat(exchangeRate),
+        },
+      });
+
+      res.json({
+        success: true,
+        data: currencyExchange,
+        message: "Currency exchange saved successfully",
+      });
+    } catch (error) {
+      console.error("Create currency exchange error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Update currency exchange
+router.put(
+  "/currency-exchanges/:id",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const { exchangeRate, isActive } = req.body;
+      const restaurantId = req.user!.restaurantId;
+
+      // Check if currency exchange exists and belongs to restaurant
+      const existing = await prisma.currencyExchange.findFirst({
+        where: {
+          id,
+          restaurantId,
+        },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          success: false,
+          message: "Currency exchange not found",
+        });
+      }
+
+      // Validate exchange rate if provided
+      if (exchangeRate !== undefined) {
+        if (parseFloat(exchangeRate) <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: "Exchange rate must be greater than 0",
+          });
+        }
+      }
+
+      const updateData: any = {};
+      if (exchangeRate !== undefined) {
+        updateData.exchangeRate = parseFloat(exchangeRate);
+      }
+      if (isActive !== undefined) {
+        updateData.isActive = isActive;
+      }
+
+      const currencyExchange = await prisma.currencyExchange.update({
+        where: { id },
+        data: updateData,
+      });
+
+      res.json({
+        success: true,
+        data: currencyExchange,
+        message: "Currency exchange updated successfully",
+      });
+    } catch (error) {
+      console.error("Update currency exchange error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Delete currency exchange
+router.delete(
+  "/currency-exchanges/:id",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res: Response): Promise<any> => {
+    try {
+      const { id } = req.params;
+      const restaurantId = req.user!.restaurantId;
+
+      // Check if currency exchange exists and belongs to restaurant
+      const existing = await prisma.currencyExchange.findFirst({
+        where: {
+          id,
+          restaurantId,
+        },
+      });
+
+      if (!existing) {
+        return res.status(404).json({
+          success: false,
+          message: "Currency exchange not found",
+        });
+      }
+
+      await prisma.currencyExchange.delete({
+        where: { id },
+      });
+
+      res.json({
+        success: true,
+        message: "Currency exchange deleted successfully",
+      });
+    } catch (error) {
+      console.error("Delete currency exchange error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

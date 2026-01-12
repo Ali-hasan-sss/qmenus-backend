@@ -116,12 +116,7 @@ export const createPlan = async (
       features,
     } = req.body;
 
-    const {
-      maxCategories,
-      maxItems,
-      canCustomizeTheme,
-      isFree,
-    } = req.body;
+    const { maxCategories, maxItems, canCustomizeTheme, isFree } = req.body;
 
     const plan = await prisma.plan.create({
       data: {
@@ -1042,7 +1037,15 @@ router.delete("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
 // Get all subscriptions
 router.get("/subscriptions", async (req: AuthRequest, res) => {
   try {
+    const { page = 1, limit = 25, status } = req.query;
+
+    const whereClause: any = {};
+    if (status && status !== "ALL") {
+      whereClause.status = status;
+    }
+
     const subscriptions = await prisma.subscription.findMany({
+      where: whereClause,
       include: {
         restaurant: {
           include: {
@@ -1055,14 +1058,37 @@ router.get("/subscriptions", async (req: AuthRequest, res) => {
             },
           },
         },
-        plan: true,
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            nameAr: true,
+            type: true,
+            price: true,
+            duration: true,
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
+      skip: (Number(page) - 1) * Number(limit),
+      take: Number(limit),
+    });
+
+    const total = await prisma.subscription.count({
+      where: whereClause,
     });
 
     res.json({
       success: true,
-      data: { subscriptions },
+      data: {
+        subscriptions,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          pages: Math.ceil(total / Number(limit)),
+        },
+      },
     });
   } catch (error) {
     console.error("Get subscriptions error:", error);
@@ -1248,7 +1274,19 @@ router.put(
           status: "ACTIVE",
           endDate: newEndDate,
         },
+        include: { plan: true, restaurant: true },
       });
+
+      // Activate restaurant if it was deactivated
+      if (!updatedSubscription.restaurant.isActive) {
+        await prisma.restaurant.update({
+          where: { id: updatedSubscription.restaurantId },
+          data: { isActive: true },
+        });
+        console.log(
+          `✅ Restaurant ${updatedSubscription.restaurant.name} (${updatedSubscription.restaurantId}) reactivated due to subscription renewal`
+        );
+      }
 
       // Create invoice for the renewal (marked as PAID since admin renewed it)
       try {
@@ -1344,8 +1382,19 @@ router.put(
           startDate: startDate,
           endDate: newEndDate,
         },
-        include: { plan: true },
+        include: { plan: true, restaurant: true },
       });
+
+      // Activate restaurant if it was deactivated
+      if (!newSubscription.restaurant.isActive) {
+        await prisma.restaurant.update({
+          where: { id: newSubscription.restaurantId },
+          data: { isActive: true },
+        });
+        console.log(
+          `✅ Restaurant ${newSubscription.restaurant.name} (${newSubscription.restaurantId}) reactivated due to subscription upgrade`
+        );
+      }
 
       // Create invoice for the upgrade (marked as PAID since admin upgraded it)
       try {
@@ -1392,13 +1441,48 @@ router.put(
 // Get all invoices (Admin only)
 router.get("/invoices", async (req: AuthRequest, res): Promise<any> => {
   try {
-    const { page = 1, limit = 10, status, type, restaurantId } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      type,
+      restaurantId,
+      search,
+    } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const where: any = {};
     if (status) where.status = status;
     if (type) where.type = type;
     if (restaurantId) where.restaurantId = restaurantId;
+
+    // Search functionality
+    if (search) {
+      const searchTerm = search as string;
+      where.OR = [
+        { customerName: { contains: searchTerm, mode: "insensitive" } },
+        { customerEmail: { contains: searchTerm, mode: "insensitive" } },
+        { restaurantName: { contains: searchTerm, mode: "insensitive" } },
+        {
+          restaurant: {
+            OR: [
+              { name: { contains: searchTerm, mode: "insensitive" } },
+              {
+                owner: {
+                  OR: [
+                    {
+                      firstName: { contains: searchTerm, mode: "insensitive" },
+                    },
+                    { lastName: { contains: searchTerm, mode: "insensitive" } },
+                    { email: { contains: searchTerm, mode: "insensitive" } },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ];
+    }
 
     const [invoices, total] = await Promise.all([
       prisma.invoice.findMany({
@@ -1835,28 +1919,47 @@ router.put("/password", async (req: AuthRequest, res): Promise<any> => {
 router.get("/notifications", authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
+    const { page = 1, limit = 25 } = req.query;
+    const skip = (Number(page) - 1) * Number(limit);
 
     // Get notifications for this admin user only
-    const notifications = await prisma.notification.findMany({
-      where: {
-        userId: userId, // Only notifications for this admin
-      },
-      include: {
-        restaurant: {
-          select: {
-            id: true,
-            name: true,
+    const [notifications, total] = await Promise.all([
+      prisma.notification.findMany({
+        where: {
+          userId: userId, // Only notifications for this admin
+        },
+        include: {
+          restaurant: {
+            select: {
+              id: true,
+              name: true,
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: Number(limit),
+      }),
+      prisma.notification.count({
+        where: {
+          userId: userId,
+        },
+      }),
+    ]);
 
     res.json({
       success: true,
-      data: notifications,
+      data: {
+        notifications,
+        pagination: {
+          page: Number(page),
+          limit: Number(limit),
+          total,
+          pages: Math.ceil(total / Number(limit)),
+        },
+      },
     });
   } catch (error) {
     console.error("Error fetching admin notifications:", error);
@@ -1960,8 +2063,18 @@ router.post(
     try {
       console.log("🚀 Starting user creation process...");
 
-      const { firstName, lastName, email, password, role, restaurant, planId } =
-        req.body;
+      const {
+        firstName,
+        lastName,
+        email: rawEmail,
+        password,
+        role,
+        restaurant,
+        planId,
+      } = req.body;
+
+      // Normalize email: convert to lowercase and trim whitespace
+      const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
       console.log("👤 Creating user with data:", {
         firstName,

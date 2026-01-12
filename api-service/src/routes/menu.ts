@@ -13,6 +13,7 @@ import {
   reorderItemsSchema,
   createCategorySchema,
   updateCategorySchema,
+  reorderCategoriesSchema,
 } from "../validators/menuValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
 
@@ -210,6 +211,94 @@ router.post(
   }
 );
 
+// Get active categories for the authenticated restaurant (dashboard usage)
+router.get(
+  "/categories",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+
+      const categories = await prisma.category.findMany({
+        where: {
+          menu: { restaurantId },
+          isActive: true,
+        },
+        orderBy: { sortOrder: "asc" },
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          description: true,
+          descriptionAr: true,
+          image: true,
+          sortOrder: true,
+          isActive: true,
+          _count: {
+            select: {
+              items: true,
+            },
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        data: { categories },
+      });
+    } catch (error) {
+      console.error("Get categories error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Reorder categories - MUST be before /categories/:id route
+router.put(
+  "/categories/reorder",
+  authenticate,
+  requireRestaurant,
+  validateRequest(reorderCategoriesSchema),
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+      const { categories } = req.body;
+
+      // Update categories in a transaction
+      await prisma.$transaction(
+        categories.map((category: { id: string; sortOrder: number }) =>
+          prisma.category.update({
+            where: {
+              id: category.id,
+              menu: {
+                restaurantId: restaurantId,
+              },
+            },
+            data: {
+              sortOrder: category.sortOrder,
+            },
+          })
+        )
+      );
+
+      res.json({
+        success: true,
+        message: "Categories reordered successfully",
+      });
+    } catch (error) {
+      console.error("Error reordering categories:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
 // Update category (alias under /api/menu)
 router.put(
   "/categories/:id",
@@ -263,52 +352,6 @@ router.put(
       });
     } catch (error) {
       console.error("Update category (alias) error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal server error",
-      });
-    }
-  }
-);
-
-// Get active categories for the authenticated restaurant (dashboard usage)
-router.get(
-  "/categories",
-  authenticate,
-  requireRestaurant,
-  async (req: AuthRequest, res): Promise<any> => {
-    try {
-      const restaurantId = req.user!.restaurantId!;
-
-      const categories = await prisma.category.findMany({
-        where: {
-          menu: { restaurantId },
-          isActive: true,
-        },
-        orderBy: { sortOrder: "asc" },
-        select: {
-          id: true,
-          name: true,
-          nameAr: true,
-          description: true,
-          descriptionAr: true,
-          image: true,
-          sortOrder: true,
-          isActive: true,
-          _count: {
-            select: {
-              items: true,
-            },
-          },
-        },
-      });
-
-      res.json({
-        success: true,
-        data: { categories },
-      });
-    } catch (error) {
-      console.error("Get categories error:", error);
       res.status(500).json({
         success: false,
         message: "Internal server error",

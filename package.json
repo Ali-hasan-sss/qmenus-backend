@@ -11,6 +11,7 @@
     "delete": "pm2 delete pm2.config.js",
     "logs": "pm2 logs",
     "status": "pm2 status",
+    "setup-log-rotation": "bash scripts/setup-log-rotation.sh",
     "cleanup-logs": "bash scripts/cleanup-logs.sh",
     "cleanup-logs:win": "powershell -File scripts/cleanup-logs.ps1",
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:socket\" \"npm run dev:jobs\"",

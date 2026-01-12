@@ -17,10 +17,9 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
-      // Log rotation settings
-      max_size: "10M", // Rotate when log file reaches 10MB
-      retain: 7, // Keep 7 rotated log files
-      compress: true, // Compress rotated logs
+      // Note: Log rotation is handled by pm2-logrotate module
+      // Install: pm2 install pm2-logrotate
+      // Configure: pm2 set pm2-logrotate:max_size 10M
     },
     {
       name: "socket-service",
@@ -40,10 +39,9 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
-      // Log rotation settings
-      max_size: "10M", // Rotate when log file reaches 10MB
-      retain: 7, // Keep 7 rotated log files
-      compress: true, // Compress rotated logs
+      // Note: Log rotation is handled by pm2-logrotate module
+      // Install: pm2 install pm2-logrotate
+      // Configure: pm2 set pm2-logrotate:max_size 10M
     },
     {
       name: "jobs-service",
@@ -63,10 +61,9 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_memory_restart: "1G",
-      // Log rotation settings
-      max_size: "10M", // Rotate when log file reaches 10MB
-      retain: 7, // Keep 7 rotated log files
-      compress: true, // Compress rotated logs
+      // Note: Log rotation is handled by pm2-logrotate module
+      // Install: pm2 install pm2-logrotate
+      // Configure: pm2 set pm2-logrotate:max_size 10M
     },
   ],
 };

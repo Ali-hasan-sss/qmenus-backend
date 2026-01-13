@@ -7,18 +7,25 @@
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma && npx tsc -p .",
     "postinstall": "npx prisma@5.22.0 generate --schema ../shared/prisma/schema.prisma",
-    "start": "node dist/jobs-service/src/index.js"
+    "start": "node dist/jobs-service/src/index.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "axios": "^1.6.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
+    "@types/jest": "^29.5.12",
     "@types/node": "^20.10.0",
     "@types/node-cron": "^3.0.11",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.6.3"
   }

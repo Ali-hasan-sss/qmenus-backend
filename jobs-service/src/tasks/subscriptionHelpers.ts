@@ -123,6 +123,7 @@ export async function checkExpiringSubscriptions() {
         endDate: {
           lte: oneDayFromNow,
           gte: new Date(), // Not expired yet
+          not: null, // Ensure endDate is not null
         },
       },
       include: {
@@ -130,6 +131,10 @@ export async function checkExpiringSubscriptions() {
         plan: true,
       },
     });
+
+    console.log(
+      `📊 Found ${expiringSubscriptions.length} expiring subscriptions (within 24 hours)`
+    );
 
     let notificationsSent = 0;
 
@@ -192,10 +197,9 @@ export async function checkExpiredSubscriptions() {
         status: "ACTIVE",
         endDate: {
           lt: now,
+          not: null, // Ensure endDate is not null
         },
-        plan: {
-          isFree: false, // Exclude free plans from expiration check
-        },
+        // Include all plans (free and paid) - check all subscriptions with endDate
       },
       include: {
         restaurant: true,
@@ -203,23 +207,42 @@ export async function checkExpiredSubscriptions() {
       },
     });
 
+    console.log(
+      `📊 Found ${expiredSubscriptions.length} expired subscriptions to process`
+    );
+
     let updatedCount = 0;
 
     for (const subscription of expiredSubscriptions) {
-      // Check if restaurant has any other active subscriptions
+      console.log(
+        `🔄 Processing expired subscription: ${subscription.id} for restaurant ${subscription.restaurant.name} (${subscription.restaurantId})`
+      );
+
+      // Check if restaurant has any other active subscriptions (that are not expired)
       const hasOtherActiveSubscription = await prisma.subscription.findFirst({
         where: {
           restaurantId: subscription.restaurantId,
           status: "ACTIVE",
           id: { not: subscription.id },
+          OR: [
+            { endDate: { gte: now } }, // Has future endDate
+            { endDate: null }, // No endDate (permanent subscription)
+          ],
         },
       });
+
+      console.log(
+        `   Restaurant has other active subscriptions: ${
+          hasOtherActiveSubscription ? "Yes" : "No"
+        }`
+      );
 
       // Update subscription status to EXPIRED
       await prisma.subscription.update({
         where: { id: subscription.id },
         data: { status: "EXPIRED" },
       });
+      console.log(`   ✅ Subscription ${subscription.id} marked as EXPIRED`);
 
       // Deactivate restaurant if no other active subscriptions exist
       if (!hasOtherActiveSubscription) {
@@ -229,6 +252,10 @@ export async function checkExpiredSubscriptions() {
         });
         console.log(
           `🔒 Restaurant ${subscription.restaurant.name} (${subscription.restaurantId}) deactivated due to expired subscription`
+        );
+      } else {
+        console.log(
+          `   ℹ️ Restaurant ${subscription.restaurant.name} remains active (has other active subscriptions)`
         );
       }
 

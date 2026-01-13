@@ -1390,7 +1390,7 @@ router.put(
         await prisma.restaurant.update({
           where: { id: newSubscription.restaurantId },
           data: { isActive: true },
-        });
+      });
         console.log(
           `✅ Restaurant ${newSubscription.restaurant.name} (${newSubscription.restaurantId}) reactivated due to subscription upgrade`
         );
@@ -1925,20 +1925,20 @@ router.get("/notifications", authenticate, async (req: AuthRequest, res) => {
     // Get notifications for this admin user only
     const [notifications, total] = await Promise.all([
       prisma.notification.findMany({
-        where: {
-          userId: userId, // Only notifications for this admin
-        },
-        include: {
-          restaurant: {
-            select: {
-              id: true,
-              name: true,
-            },
+      where: {
+        userId: userId, // Only notifications for this admin
+      },
+      include: {
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
           },
         },
-        orderBy: {
-          createdAt: "desc",
-        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
         skip,
         take: Number(limit),
       }),

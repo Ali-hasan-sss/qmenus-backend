@@ -20,6 +20,31 @@ async function createNotification(
         type: type as any,
       },
     });
+
+    // Send real-time notification via socket-service
+    try {
+      const axios = require("axios");
+      const env = require("../../../shared/config/env").env;
+      const socketServiceUrl =
+        env.SOCKET_SERVICE_URL ||
+        `http://localhost:${env.SOCKET_PORT || "5001"}`;
+
+      await axios.post(`${socketServiceUrl}/api/emit-notification`, {
+        notification,
+        restaurantIds: [restaurantId],
+      });
+
+      console.log(
+        `✅ Sent real-time notification to restaurant ${restaurantId} via socket`
+      );
+    } catch (socketError: any) {
+      console.error(
+        "⚠️ Socket notification error:",
+        socketError?.message || socketError
+      );
+      // Continue anyway - notification is saved in DB
+    }
+
     return notification;
   } catch (error) {
     console.error("Error creating notification:", error);

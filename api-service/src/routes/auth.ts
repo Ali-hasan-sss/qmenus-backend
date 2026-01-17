@@ -1,6 +1,7 @@
 import express, { Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import prisma from "../../../shared/config/db";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import {
@@ -27,9 +28,38 @@ import {
   sendVerificationEmail,
   sendPasswordResetEmail,
   hashCode,
+  testEmailSending,
 } from "../helpers/emailHelpers";
+import { getClientIp } from "../helpers/ipHelpers";
 
 const router = express.Router();
+
+// Rate limiting for login: 5 attempts per 5 minutes per IP
+const loginRateLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 5, // Limit each IP to 5 requests per windowMs
+  message: {
+    success: false,
+    message: "Too many login attempts. Please try again after 5 minutes.",
+    code: "LOGIN_RATE_LIMIT_EXCEEDED",
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  keyGenerator: (req: express.Request) => {
+    // Use IP address for rate limiting (handles proxy)
+    return getClientIp(req);
+  },
+  skipSuccessfulRequests: false, // Count all requests, including successful ones
+  skipFailedRequests: false, // Count failed requests too
+  handler: (req: express.Request, res: Response) => {
+    // Custom handler to ensure proper JSON response with code
+    res.status(429).json({
+      success: false,
+      message: "Too many login attempts. Please try again after 5 minutes.",
+      code: "LOGIN_RATE_LIMIT_EXCEEDED",
+    });
+  },
+});
 
 // Register new user (enforce pre-verified email)
 export const registerUser = async (
@@ -62,6 +92,7 @@ export const registerUser = async (
       return res.status(400).json({
         success: false,
         message: "User already exists with this email",
+        code: "USER_ALREADY_EXISTS",
       });
     }
 
@@ -79,6 +110,7 @@ export const registerUser = async (
         success: false,
         message:
           "Email not verified. Please verify your email before creating an account.",
+        code: "EMAIL_NOT_VERIFIED",
       });
     }
 
@@ -353,6 +385,7 @@ export const loginUser = async (
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
+        code: "INVALID_CREDENTIALS",
       });
     }
 
@@ -362,6 +395,7 @@ export const loginUser = async (
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
+        code: "INVALID_CREDENTIALS",
       });
     }
 
@@ -371,6 +405,7 @@ export const loginUser = async (
         success: false,
         message:
           "Email not verified. Please check your email for verification code.",
+        code: "EMAIL_NOT_VERIFIED",
         requiresEmailVerification: true,
         email: user.email,
       });
@@ -452,11 +487,12 @@ export const loginUser = async (
     res.status(500).json({
       success: false,
       message: "Internal server error",
+      code: "SERVER_ERROR",
     });
   }
 };
 
-router.post("/login", validateRequest(loginSchema), loginUser);
+router.post("/login", loginRateLimiter, validateRequest(loginSchema), loginUser);
 
 // Get current user profile
 export const getProfile = async (
@@ -822,16 +858,15 @@ export const verifyEmail = async (
         .json({ success: false, message: "Email is already verified" });
     }
 
-    // TEMPORARY: Accept "0000" directly without hash check
-    const isDefaultCode = verificationCode === "000000";
+    // Validate verification code by comparing hashed codes
     const hashedInput = hashCode(verificationCode);
-    const isValidCode =
-      isDefaultCode || (pending.code && pending.code === hashedInput);
+    const isValidCode = pending.code && pending.code === hashedInput;
 
     if (!isValidCode) {
       return res.status(400).json({
         success: false,
         message: "Invalid verification code",
+        code: "INVALID_VERIFICATION_CODE",
       });
     }
 
@@ -840,6 +875,7 @@ export const verifyEmail = async (
       return res.status(400).json({
         success: false,
         message: "Verification code has expired",
+        code: "VERIFICATION_CODE_EXPIRED",
       });
     }
 
@@ -862,7 +898,150 @@ export const verifyEmail = async (
   }
 };
 
-// Resend verification code
+// Send verification code for registration (checks if user doesn't exist)
+export const sendVerificationCodeForRegistration = async (
+  req: AuthRequest,
+  res: Response
+): Promise<any> => {
+  try {
+    const { email: rawEmail } = req.body;
+    // Normalize email: convert to lowercase and trim whitespace
+    const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
+
+    // Check if user already exists - IMPORTANT: Don't send code if user exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists with this email. Please login instead.",
+        code: "USER_ALREADY_EXISTS",
+      });
+    }
+
+    const now = new Date();
+    const existing = await prisma.emailVerification.findUnique({
+      where: { email },
+    });
+
+    // Rate limiting: Allow 5 attempts, then 15 minutes cooldown, then progressive delays
+    let cooldownMinutes = 0;
+    let attemptCount = 0;
+    let lastAttemptAt: Date | null = null;
+
+    if (existing) {
+      attemptCount = existing.attemptCount || 0;
+      lastAttemptAt = existing.lastAttemptAt || existing.updatedAt;
+
+      // Reset attempt count if last attempt was more than 24 hours ago
+      if (
+        lastAttemptAt &&
+        now.getTime() - lastAttemptAt.getTime() > 24 * 60 * 60 * 1000
+      ) {
+        attemptCount = 0;
+      }
+
+      // Calculate cooldown based on attempt count
+      // Start rate limiting after 2 attempts (from 3rd attempt onwards)
+      if (attemptCount < 2) {
+        // First 2 attempts: No cooldown (allow immediately)
+        cooldownMinutes = 0;
+      } else if (attemptCount < 5) {
+        // 3rd, 4th, 5th attempts: 1 minute cooldown
+        cooldownMinutes = 1;
+      } else if (attemptCount === 5) {
+        // After 5 attempts: 15 minutes (quarter hour)
+        cooldownMinutes = 15;
+      } else {
+        // Progressive delay: 15 + (attemptCount - 5) * 5 minutes
+        // 6th attempt: 20 minutes, 7th: 25 minutes, etc.
+        cooldownMinutes = 15 + (attemptCount - 5) * 5;
+        // Cap at 60 minutes maximum
+        if (cooldownMinutes > 60) {
+          cooldownMinutes = 60;
+        }
+      }
+
+      // Check if cooldown period has passed (only if cooldown > 0)
+      if (cooldownMinutes > 0 && lastAttemptAt) {
+        const cooldownMs = cooldownMinutes * 60 * 1000;
+        const timeSinceLastAttempt = now.getTime() - lastAttemptAt.getTime();
+
+        if (timeSinceLastAttempt < cooldownMs) {
+          const remainingMinutes = Math.ceil(
+            (cooldownMs - timeSinceLastAttempt) / (60 * 1000)
+          );
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${remainingMinutes} minute${
+              remainingMinutes > 1 ? "s" : ""
+            } before requesting a new code`,
+            code: "RATE_LIMIT_EXCEEDED",
+            remainingMinutes,
+            attemptCount: attemptCount + 1, // Next attempt number
+          });
+        }
+      }
+    }
+
+    // Generate verification code
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const hashed = hashCode(verificationCode);
+
+    // Send verification email first (before updating attempt count)
+    const emailSent = await sendVerificationEmail(
+      email,
+      "User", // Default name since we don't have firstName at this stage
+      verificationCode
+    );
+
+    if (!emailSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send verification email. Please try again later.",
+        code: "VERIFICATION_EMAIL_FAILED",
+      });
+    }
+
+    // Only update attempt count if email was sent successfully
+    // Upsert into EmailVerification table (store hashed code and update attempt count)
+    await prisma.emailVerification.upsert({
+      where: { email },
+      create: {
+        email,
+        code: hashed,
+        expiresAt: verificationCodeExpires,
+        attemptCount: 1,
+        lastAttemptAt: now,
+      },
+      update: {
+        code: hashed,
+        expiresAt: verificationCodeExpires,
+        verified: false,
+        verifiedAt: null,
+        attemptCount: attemptCount + 1,
+        lastAttemptAt: now,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Verification code sent successfully. Please check your email.",
+    });
+  } catch (error) {
+    console.error("Send verification code for registration error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      code: "SERVER_ERROR",
+    });
+  }
+};
+
+// Resend verification code (doesn't check if user exists - for resending to existing verification)
 export const resendVerificationCode = async (
   req: AuthRequest,
   res: Response
@@ -872,55 +1051,122 @@ export const resendVerificationCode = async (
     // Normalize email: convert to lowercase and trim whitespace
     const email = rawEmail ? rawEmail.trim().toLowerCase() : "";
 
-    // Enforce 10-minute cooldown from last update
+    const now = new Date();
     const existing = await prisma.emailVerification.findUnique({
       where: { email },
     });
-    if (
-      existing &&
-      existing.updatedAt &&
-      existing.updatedAt > new Date(Date.now() - 10 * 60 * 1000)
-    ) {
-      return res.status(429).json({
+
+    // Rate limiting: Allow 5 attempts, then 15 minutes cooldown, then progressive delays
+    let cooldownMinutes = 0;
+    let attemptCount = 0;
+    let lastAttemptAt: Date | null = null;
+
+    if (existing) {
+      attemptCount = existing.attemptCount || 0;
+      lastAttemptAt = existing.lastAttemptAt || existing.updatedAt;
+
+      // Reset attempt count if last attempt was more than 24 hours ago
+      if (
+        lastAttemptAt &&
+        now.getTime() - lastAttemptAt.getTime() > 24 * 60 * 60 * 1000
+      ) {
+        attemptCount = 0;
+      }
+
+      // Calculate cooldown based on attempt count
+      // Start rate limiting after 2 attempts (from 3rd attempt onwards)
+      if (attemptCount < 2) {
+        // First 2 attempts: No cooldown (allow immediately)
+        cooldownMinutes = 0;
+      } else if (attemptCount < 5) {
+        // 3rd, 4th, 5th attempts: 1 minute cooldown
+        cooldownMinutes = 1;
+      } else if (attemptCount === 5) {
+        // After 5 attempts: 15 minutes (quarter hour)
+        cooldownMinutes = 15;
+      } else {
+        // Progressive delay: 15 + (attemptCount - 5) * 5 minutes
+        // 6th attempt: 20 minutes, 7th: 25 minutes, etc.
+        cooldownMinutes = 15 + (attemptCount - 5) * 5;
+        // Cap at 60 minutes maximum
+        if (cooldownMinutes > 60) {
+          cooldownMinutes = 60;
+        }
+      }
+
+      // Check if cooldown period has passed (only if cooldown > 0)
+      if (cooldownMinutes > 0 && lastAttemptAt) {
+        const cooldownMs = cooldownMinutes * 60 * 1000;
+        const timeSinceLastAttempt = now.getTime() - lastAttemptAt.getTime();
+
+        if (timeSinceLastAttempt < cooldownMs) {
+          const remainingMinutes = Math.ceil(
+            (cooldownMs - timeSinceLastAttempt) / (60 * 1000)
+          );
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${remainingMinutes} minute${
+              remainingMinutes > 1 ? "s" : ""
+            } before requesting a new code`,
+            code: "RATE_LIMIT_EXCEEDED",
+            remainingMinutes,
+            attemptCount: attemptCount + 1, // Next attempt number
+          });
+        }
+      }
+    }
+
+    // Generate verification code
+    const verificationCode = generateVerificationCode();
+    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const hashed = hashCode(verificationCode);
+
+    // Send verification email first (before updating attempt count)
+    const emailSent = await sendVerificationEmail(
+      email,
+      firstName || "User",
+      verificationCode
+    );
+
+    if (!emailSent) {
+      return res.status(500).json({
         success: false,
-        message: "Please wait 10 minutes before requesting a new code",
+        message: "Failed to send verification email. Please try again later.",
+        code: "VERIFICATION_EMAIL_FAILED",
       });
     }
 
-    // TEMPORARY: Use "0000" as verification code (email sending disabled)
-    const verificationCode = "0000";
-    const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
-    const hashed = hashCode(verificationCode);
-
-    // Upsert into EmailVerification table (store hashed code)
+    // Only update attempt count if email was sent successfully
+    // Upsert into EmailVerification table (store hashed code and update attempt count)
     await prisma.emailVerification.upsert({
       where: { email },
       create: {
         email,
         code: hashed,
         expiresAt: verificationCodeExpires,
+        attemptCount: 1,
+        lastAttemptAt: now,
       },
       update: {
         code: hashed,
         expiresAt: verificationCodeExpires,
         verified: false,
         verifiedAt: null,
+        attemptCount: attemptCount + 1,
+        lastAttemptAt: now,
       },
     });
 
-    // TEMPORARY: Skip email sending - verification code is "0000"
-    console.log("⚠️ Email verification disabled - using code: 0000");
-    console.log(`📧 Verification code for ${email}: ${verificationCode}`);
-
     res.json({
       success: true,
-      message: "Verification code sent successfully",
+      message: "Verification code sent successfully. Please check your email.",
     });
   } catch (error) {
     console.error("Resend verification code error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",
+      code: "SERVER_ERROR",
     });
   }
 };
@@ -944,7 +1190,75 @@ export const forgotPassword = async (
       return res.status(404).json({
         success: false,
         message: "User not found",
+        code: "USER_NOT_FOUND",
       });
+    }
+
+    const now = new Date();
+    // Check for existing password reset attempts
+    const existingReset = await prisma.passwordReset.findFirst({
+      where: { email, used: false },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Rate limiting: Allow 3 attempts, then 5 minutes cooldown, then progressive delays
+    let cooldownMinutes = 0;
+    let attemptCount = 0;
+    let lastAttemptAt: Date | null = null;
+
+    if (existingReset) {
+      attemptCount = existingReset.attemptCount || 0;
+      lastAttemptAt = existingReset.lastAttemptAt || existingReset.createdAt;
+
+      // Reset attempt count if last attempt was more than 24 hours ago
+      if (
+        lastAttemptAt &&
+        now.getTime() - lastAttemptAt.getTime() > 24 * 60 * 60 * 1000
+      ) {
+        attemptCount = 0;
+      }
+
+      // Calculate cooldown based on attempt count
+      // Start rate limiting after 2 attempts (from 3rd attempt onwards)
+      if (attemptCount < 2) {
+        // First 2 attempts: No cooldown (allow immediately)
+        cooldownMinutes = 0;
+      } else if (attemptCount === 2) {
+        // 3rd attempt: 1 minute cooldown
+        cooldownMinutes = 1;
+      } else if (attemptCount === 3) {
+        // After 3 attempts: 5 minutes
+        cooldownMinutes = 5;
+      } else {
+        // Progressive delay: 5 + (attemptCount - 3) * 3 minutes
+        // 4th attempt: 8 minutes, 5th: 11 minutes, etc.
+        cooldownMinutes = 5 + (attemptCount - 3) * 3;
+        // Cap at 30 minutes maximum
+        if (cooldownMinutes > 30) {
+          cooldownMinutes = 30;
+        }
+      }
+
+      // Check if cooldown period has passed (only if cooldown > 0)
+      if (cooldownMinutes > 0 && lastAttemptAt) {
+        const cooldownMs = cooldownMinutes * 60 * 1000;
+        const timeSinceLastAttempt = now.getTime() - lastAttemptAt.getTime();
+
+        if (timeSinceLastAttempt < cooldownMs) {
+          const remainingMinutes = Math.ceil(
+            (cooldownMs - timeSinceLastAttempt) / (60 * 1000)
+          );
+          return res.status(429).json({
+            success: false,
+            message: `Please wait ${remainingMinutes} minute${
+              remainingMinutes > 1 ? "s" : ""
+            } before requesting a new code`,
+            code: "RATE_LIMIT_EXCEEDED",
+            remainingMinutes,
+            attemptCount: attemptCount + 1,
+          });
+        }
+      }
     }
 
     // Generate reset code (10 minutes) and store hashed
@@ -952,21 +1266,12 @@ export const forgotPassword = async (
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     const resetHashed = hashCode(resetCode);
 
-    // Delete any existing reset codes for this email
+    // Delete any existing unused reset codes for this email
     await prisma.passwordReset.deleteMany({
-      where: { email },
+      where: { email, used: false },
     });
 
-    // Create new password reset record
-    await prisma.passwordReset.create({
-      data: {
-        email,
-        resetCode: resetHashed,
-        expiresAt,
-      },
-    });
-
-    // Send password reset email
+    // Send password reset email first (before updating attempt count)
     const emailSent = await sendPasswordResetEmail(
       user.email,
       user.firstName,
@@ -977,8 +1282,21 @@ export const forgotPassword = async (
       return res.status(500).json({
         success: false,
         message: "Failed to send password reset email",
+        code: "PASSWORD_RESET_EMAIL_FAILED",
       });
     }
+
+    // Only update attempt count if email was sent successfully
+    // Create new password reset record with attempt tracking
+    await prisma.passwordReset.create({
+      data: {
+        email,
+        resetCode: resetHashed,
+        expiresAt,
+        attemptCount: attemptCount + 1,
+        lastAttemptAt: now,
+      },
+    });
 
     res.json({
       success: true,
@@ -1031,6 +1349,7 @@ export const resetPassword = async (
       return res.status(400).json({
         success: false,
         message: "Invalid or expired reset code",
+        code: "INVALID_RESET_CODE",
       });
     }
 
@@ -1070,6 +1389,13 @@ export const resetPassword = async (
 
 // Routes
 router.post("/verify-email", validateRequest(verifyEmailSchema), verifyEmail);
+// Send verification code for registration (checks if user doesn't exist)
+router.post(
+  "/send-verification",
+  validateRequest(resendVerificationSchema),
+  sendVerificationCodeForRegistration
+);
+// Resend verification code (doesn't check if user exists - for resending)
 router.post(
   "/resend-verification",
   validateRequest(resendVerificationSchema),
@@ -1085,5 +1411,58 @@ router.post(
   validateRequest(resetPasswordSchema),
   resetPassword
 );
+
+// Test SMTP configuration endpoint (for debugging)
+export const testSMTP = async (
+  req: AuthRequest,
+  res: Response
+): Promise<any> => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required for testing",
+      });
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email address",
+      });
+    }
+
+    console.log(`🧪 Testing SMTP configuration for: ${email}`);
+
+    const result = await testEmailSending(email);
+
+    if (result) {
+      return res.json({
+        success: true,
+        message:
+          "Test email sent successfully. Please check your inbox (and spam folder).",
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message:
+          "Failed to send test email. Check server logs for detailed error information.",
+      });
+    }
+  } catch (error: any) {
+    console.error("Test SMTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
+// Test SMTP endpoint (no validation needed - just for testing)
+router.post("/test-smtp", testSMTP);
 
 export default router;

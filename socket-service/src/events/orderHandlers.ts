@@ -325,7 +325,27 @@ export const setupSocketHandlers = (io: Server) => {
           );
         }
 
-        // Validate and create order items
+        // Get restaurant settings for tax calculation
+        const settings = await prisma.restaurantSettings.findUnique({
+          where: { restaurantId },
+        });
+        
+        // Calculate total tax percentage
+        let totalTaxPercentage = 0;
+        if (settings && settings.taxes) {
+          const taxesConfig = settings.taxes as any;
+          if (Array.isArray(taxesConfig) && taxesConfig.length > 0) {
+            totalTaxPercentage = taxesConfig.reduce((sum: number, tax: any) => {
+              if (tax && tax.percentage !== undefined) {
+                return sum + Number(tax.percentage);
+              }
+              return sum;
+            }, 0);
+          }
+        }
+
+        // Validate and create order items with discount and tax calculation
+        let totalPriceInclusive = 0;
         const orderItems = items.map((item: any) => {
           // Find menu item in all categories
           let foundItem: any = null;
@@ -340,19 +360,106 @@ export const setupSocketHandlers = (io: Server) => {
             throw new Error(`Menu item ${item.menuItemId} not found`);
           }
 
+          // ============================================
+          // TAX-INCLUSIVE PRICING: EXTRACT TAXES FIRST, THEN APPLY DISCOUNT
+          // ============================================
+          const originalPriceInclusive = Number(foundItem.price) || 0;
+          
+          // Get discount from menuItem (at order creation time)
+          let discountValue = 0;
+          try {
+            if (foundItem.discount !== null && foundItem.discount !== undefined) {
+              let discountNum: number;
+              
+              if (typeof foundItem.discount === 'object' && foundItem.discount !== null) {
+                if ('toNumber' in foundItem.discount && typeof (foundItem.discount as any).toNumber === 'function') {
+                  discountNum = (foundItem.discount as any).toNumber();
+                } else if ('toString' in foundItem.discount && typeof (foundItem.discount as any).toString === 'function') {
+                  discountNum = parseFloat((foundItem.discount as any).toString());
+                } else {
+                  discountNum = Number(foundItem.discount);
+                }
+              } else if (typeof foundItem.discount === 'number') {
+                discountNum = foundItem.discount;
+              } else if (typeof foundItem.discount === 'string') {
+                discountNum = parseFloat(foundItem.discount);
+              } else {
+                discountNum = Number(foundItem.discount);
+              }
+              
+              if (!isNaN(discountNum) && isFinite(discountNum) && discountNum >= 0 && discountNum <= 100) {
+                discountValue = discountNum;
+              }
+            }
+          } catch (error) {
+            console.error(`[Socket] Error converting discount for item ${foundItem.name}:`, error);
+          }
+          
+          // Extract price without tax from tax-inclusive price
+          let priceWithoutTax = totalTaxPercentage > 0
+            ? originalPriceInclusive / (1 + totalTaxPercentage / 100)
+            : originalPriceInclusive;
+          
+          // Apply discount to price WITHOUT tax
+          if (discountValue > 0 && discountValue <= 100) {
+            priceWithoutTax = priceWithoutTax * (1 - discountValue / 100);
+          }
+          
+          // Calculate final tax-inclusive price after discount
+          const finalPriceInclusive = totalTaxPercentage > 0
+            ? priceWithoutTax * (1 + totalTaxPercentage / 100)
+            : priceWithoutTax;
+          
+          // Calculate extras price (assumed tax-inclusive)
+          let extrasPrice = 0;
+          if (item.extras && typeof item.extras === "object") {
+            Object.values(item.extras).forEach((extraGroup: any) => {
+              if (Array.isArray(extraGroup)) {
+                extraGroup.forEach((extraId: string) => {
+                  if (foundItem.extras) {
+                    Object.values(foundItem.extras).forEach((group: any) => {
+                      if (group.options) {
+                        const option = group.options.find((opt: any) => opt.id === extraId);
+                        if (option && option.price) {
+                          extrasPrice += option.price;
+                        }
+                      }
+                    });
+                  }
+                });
+              }
+            });
+          }
+          
+          // Calculate item total (tax-inclusive, after discount + extras)
+          const itemTotalInclusive = (finalPriceInclusive + extrasPrice) * item.quantity;
+          totalPriceInclusive += itemTotalInclusive;
+          
+          // Add extras details to notes
+          let finalNotes = item.notes || "";
+          if (item.extras && Object.keys(item.extras).length > 0) {
+            const extrasNames = getExtrasNamesForNotes(item.extras, foundItem.extras);
+            if (extrasNames.length > 0) {
+              const extrasText = `Extras: ${extrasNames.join(", ")}`;
+              finalNotes = finalNotes ? `${finalNotes}; ${extrasText}` : extrasText;
+            }
+          }
+          
+          console.log(`[Socket] Item: ${foundItem.name}, Original: ${originalPriceInclusive}, Discount: ${discountValue}%, Final: ${finalPriceInclusive}, Extras: ${extrasPrice}, Total: ${itemTotalInclusive}`);
+          
           return {
             menuItemId: item.menuItemId,
             quantity: item.quantity,
-            price: parseFloat(foundItem.price) || 0,
-            notes: item.notes,
+            price: finalPriceInclusive + extrasPrice, // Tax-inclusive price per item (AFTER discount + extras) - FROZEN at order creation
+            discount: discountValue > 0 && discountValue <= 100 ? discountValue : null, // Discount % at order creation (0-100) - FROZEN, stored with order item
+            notes: finalNotes,
+            extras: item.extras,
             kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
           };
         });
 
-        // Calculate total price
-        const totalPrice = orderItems.reduce((sum: number, item: any) => {
-          return sum + item.price * item.quantity;
-        }, 0);
+        // Total price = sum of all tax-inclusive prices (after discount)
+        const totalPrice = totalPriceInclusive;
 
         // Create the order in the database
         const orderData: any = {
@@ -427,13 +534,13 @@ export const setupSocketHandlers = (io: Server) => {
           message: "Order created successfully",
         });
 
-        // Broadcast to restaurant room (including quick orders)
+        // Broadcast to restaurant room (always emit for UI updates, but notifications are skipped for quick orders)
         io.to(`restaurant_${restaurantId}`).emit("new_order", {
           order,
           message: isQuickOrder ? "Quick order received" : "New order received",
         });
 
-        // Also emit to admin if exists
+        // Also emit to admin if exists (always emit for UI updates)
         io.to("admin_all").emit("new_order", {
           order,
           message: isQuickOrder ? "Quick order received" : "New order received",

@@ -35,8 +35,53 @@ ALLOWED_ORIGINS=https://www.qmenussy.com,https://qmenussy.com
 # Socket Service URL
 SOCKET_SERVICE_URL=http://localhost:5001
 
-# Email (Resend API Key)
-RESEND_API_KEY=your_resend_api_key_here
+# Email (SMTP Configuration)
+# SMTP Host - عنوان خادم البريد الصادر
+SMTP_HOST=mail.qmenussy.com
+
+# SMTP Port - منفذ SMTP (465 مع SSL موصى به، أو 587 مع STARTTLS)
+# البورت 465 مع SSL هو الأكثر استقراراً ويجنب مشاكل STARTTLS
+SMTP_PORT=465
+
+# SMTP Secure - true للبورت 465 (SSL), false للبورت 587 (STARTTLS)
+# يجب أن يكون true عند استخدام البورت 465
+SMTP_SECURE=true
+
+# SMTP Require TLS - هل يتطلب TLS/STARTTLS (افتراضي: true)
+# إذا كان الخادم لا يدعم STARTTLS، ضع: SMTP_REQUIRE_TLS=false
+SMTP_REQUIRE_TLS=true
+
+# SMTP Ignore TLS - تجاهل TLS بالكامل (غير موصى به إلا إذا كان ضرورياً)
+# استخدم فقط إذا كان الخادم لا يدعم TLS على الإطلاق
+SMTP_IGNORE_TLS=false
+
+# SMTP Debug - تفعيل وضع التصحيح (اختياري، للمساعدة في حل المشاكل)
+SMTP_DEBUG=false
+
+# SMTP User - اسم المستخدم (البريد الإلكتروني الكامل)
+SMTP_USER=info@qmenussy.com
+
+# SMTP Password - كلمة مرور البريد الإلكتروني
+SMTP_PASS=your_email_password_here
+
+# Email From - البريد الإلكتروني المرسل (يمكن أن يكون نفس SMTP_USER)
+EMAIL_FROM=info@qmenussy.com
+
+# Email From Name - اسم المرسل الذي يظهر في صندوق الوارد (افتراضي: Q-menus)
+EMAIL_FROM_NAME=Q-menus
+
+# Email Logo URL - رابط اللوجو الذي يظهر في رسائل البريد الإلكتروني
+# يمكن استخدام رابط مطلق أو نسبي (افتراضي: https://www.qmenussy.com/images/logo.png)
+EMAIL_LOGO_URL=https://www.qmenussy.com/images/logo.png
+
+# Contact Email - البريد الإلكتروني المستقبل لرسائل "اتصل بنا" (اختياري)
+# يمكن استخدامه كـ fallback إذا لم يتم تعيين CONTACT_RECIPIENT_EMAIL
+CONTACT_EMAIL=info@qmenussy.com
+
+# Contact Recipient Email - البريد الإلكتروني المستقبل لرسائل "اتصل بنا" (أولوية عالية)
+# هذا البريد سيستقبل جميع رسائل "اتصل بنا" (مثل بريد الجيميل الشخصي)
+# إذا تم تعيينه، سيتم تجاهل CONTACT_EMAIL وقاعدة البيانات
+CONTACT_RECIPIENT_EMAIL=your-email@gmail.com
 
 # Other settings
 SKIP_EMAIL_VERIFICATION=false

@@ -26,7 +26,18 @@ export const updateRestaurantSchema = Joi.object({
     .messages({
       "string.pattern.base": "Please provide a valid phone number",
     }),
-  logo: Joi.string().uri().allow("").optional().messages({
+  logo: Joi.string().allow("", null).optional().custom((value, helpers) => {
+    // If logo is empty string or null, it's valid
+    if (!value || value === "") {
+      return value;
+    }
+    // Otherwise, validate it's a valid URI
+    const uriPattern = /^https?:\/\/.+/;
+    if (!uriPattern.test(value)) {
+      return helpers.error("string.uri");
+    }
+    return value;
+  }).messages({
     "string.uri": "Logo must be a valid URL",
   }),
   currency: Joi.string().length(3).uppercase().optional().messages({

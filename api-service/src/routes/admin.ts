@@ -1112,6 +1112,31 @@ router.post("/subscriptions", async (req: AuthRequest, res): Promise<any> => {
       });
     }
 
+    // If the new plan is not free, cancel all active free plan subscriptions
+    if (!plan.isFree) {
+      // Get free plan
+      const freePlan = await prisma.plan.findFirst({
+        where: { isFree: true },
+      });
+
+      if (freePlan) {
+        // Cancel all active free plan subscriptions for this restaurant
+        await prisma.subscription.updateMany({
+          where: {
+            restaurantId,
+            planId: freePlan.id,
+            status: "ACTIVE",
+          },
+          data: {
+            status: "CANCELLED",
+          },
+        });
+        console.log(
+          `✅ Cancelled free plan subscriptions for restaurant ${restaurantId}`
+        );
+      }
+    }
+
     const startDate = new Date();
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + (duration || plan.duration));
@@ -2185,6 +2210,31 @@ router.post(
         });
 
         console.log("✅ Restaurant linked to user:", user.id);
+
+        // If the plan is not free, cancel any existing free plan subscriptions
+        if (!plan.isFree) {
+          // Get free plan
+          const freePlan = await prisma.plan.findFirst({
+            where: { isFree: true },
+          });
+
+          if (freePlan) {
+            // Cancel all active free plan subscriptions for this restaurant
+            await prisma.subscription.updateMany({
+              where: {
+                restaurantId: createdRestaurant.id,
+                planId: freePlan.id,
+                status: "ACTIVE",
+              },
+              data: {
+                status: "CANCELLED",
+              },
+            });
+            console.log(
+              `✅ Cancelled free plan subscriptions for restaurant ${createdRestaurant.id}`
+            );
+          }
+        }
 
         // Create subscription
         const startDate = new Date();

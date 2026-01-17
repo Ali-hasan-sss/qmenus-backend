@@ -6,6 +6,7 @@ import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import { env } from "../../shared/config/env";
 import prisma from "../../shared/config/db";
+import { getClientIp } from "./helpers/ipHelpers";
 
 // Import routes
 import authRoutes from "./routes/auth";
@@ -156,14 +157,38 @@ app.use(
   })
 );
 
-// Rate limiting - increased for development
+// Rate limiting - configured for real-world restaurant usage
+// Each restaurant may have multiple devices (POS, tablets, phones) making requests
+// Typical usage: 50-200 requests per 15 minutes per device
+// With multiple devices per restaurant: 200-500 requests per 15 minutes per IP
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs
-  message: "Too many requests from this IP, please try again later.",
+  max: 500, // limit each IP to 500 requests per 15 minutes (suitable for restaurant with multiple devices)
+  message: {
+    success: false,
+    message: "Too many requests from this IP, please try again later.",
+    code: "RATE_LIMIT_EXCEEDED",
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  keyGenerator: (req: express.Request) => {
+    // Use IP address for rate limiting (handles proxy correctly)
+    // This ensures requests from different devices behind the same proxy are tracked separately
+    return getClientIp(req);
+  },
   skip: (req) => {
     // Skip rate limiting for health checks
-    return req.path === "/health";
+    return req.path === "/health" || req.path === "/api/health";
+  },
+  skipSuccessfulRequests: false, // Count all requests
+  skipFailedRequests: false, // Count failed requests too
+  handler: (req: express.Request, res: express.Response) => {
+    // Custom handler to ensure proper JSON response
+    res.status(429).json({
+      success: false,
+      message: "Too many requests from this IP, please try again later.",
+      code: "RATE_LIMIT_EXCEEDED",
+    });
   },
 });
 app.use(limiter);

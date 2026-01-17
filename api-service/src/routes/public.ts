@@ -1,6 +1,10 @@
 import express, { Response } from "express";
 import prisma from "../../../shared/config/db";
 import { DEFAULT_THEME } from "../constants/defaultTheme";
+import {
+  sendContactUsEmail,
+  sendContactUsEmailEN,
+} from "../helpers/emailHelpers";
 
 const router = express.Router();
 
@@ -641,48 +645,150 @@ router.get("/health", (req, res) => {
 });
 
 // Get currency exchanges for a restaurant (public)
-router.get("/restaurant/:restaurantId/currency-exchanges", async (req, res): Promise<any> => {
-  try {
-    const { restaurantId } = req.params;
+router.get(
+  "/restaurant/:restaurantId/currency-exchanges",
+  async (req, res): Promise<any> => {
+    try {
+      const { restaurantId } = req.params;
 
-    // Verify restaurant exists and is active
-    const restaurant = await prisma.restaurant.findFirst({
-      where: {
-        id: restaurantId,
-        isActive: true,
-      },
-    });
+      // Verify restaurant exists and is active
+      const restaurant = await prisma.restaurant.findFirst({
+        where: {
+          id: restaurantId,
+          isActive: true,
+        },
+      });
 
-    if (!restaurant) {
-      return res.status(404).json({
+      if (!restaurant) {
+        return res.status(404).json({
+          success: false,
+          message: "Restaurant not found",
+        });
+      }
+
+      // Get active currency exchanges
+      const currencyExchanges = await prisma.currencyExchange.findMany({
+        where: {
+          restaurantId,
+          isActive: true,
+        },
+        orderBy: {
+          createdAt: "asc",
+        },
+        select: {
+          id: true,
+          currency: true,
+          exchangeRate: true,
+          isActive: true,
+        },
+      });
+
+      res.json({
+        success: true,
+        data: currencyExchanges,
+      });
+    } catch (error) {
+      console.error("Get currency exchanges error:", error);
+      res.status(500).json({
         success: false,
-        message: "Restaurant not found",
+        message: "Internal server error",
+      });
+    }
+  }
+);
+
+// Send contact us form message
+router.post("/contact", async (req, res): Promise<any> => {
+  try {
+    const { name, email, message, lang } = req.body;
+
+    // Validate required fields
+    if (!name || !email || !message) {
+      return res.status(400).json({
+        success: false,
+        message:
+          lang === "ar"
+            ? "الرجاء ملء جميع الحقول المطلوبة"
+            : "Please fill all required fields",
       });
     }
 
-    // Get active currency exchanges
-    const currencyExchanges = await prisma.currencyExchange.findMany({
-      where: {
-        restaurantId,
-        isActive: true,
-      },
-      orderBy: {
-        createdAt: "asc",
-      },
-      select: {
-        id: true,
-        currency: true,
-        exchangeRate: true,
-        isActive: true,
-      },
-    });
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          lang === "ar"
+            ? "البريد الإلكتروني غير صحيح"
+            : "Invalid email address",
+      });
+    }
+
+    // Get contact email from database or use env variable
+    let contactEmail: string | undefined;
+    try {
+      const contactSection = await prisma.section.findFirst({
+        where: { type: "CONTACT" },
+      });
+
+      if (contactSection && contactSection.attributes) {
+        // attributes is a JSON field, parse it if it's a string
+        let attributes: any[] = [];
+        if (typeof contactSection.attributes === "string") {
+          try {
+            attributes = JSON.parse(contactSection.attributes);
+          } catch (e) {
+            console.error("Error parsing attributes JSON:", e);
+          }
+        } else if (Array.isArray(contactSection.attributes)) {
+          attributes = contactSection.attributes;
+        }
+
+        // Try to find email attribute
+        const emailAttribute = attributes.find(
+          (attr: any) =>
+            attr.key?.toLowerCase().includes("email") ||
+            attr.keyAr?.toLowerCase().includes("بريد") ||
+            attr.key?.toLowerCase().includes("mail")
+        );
+        if (emailAttribute) {
+          contactEmail =
+            lang === "ar" ? emailAttribute.valueAr : emailAttribute.value;
+          // Clean email (remove non-email characters if needed)
+          contactEmail = contactEmail?.replace(/[^\w@.-]/g, "");
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching contact section:", error);
+      // Continue with env variable fallback
+    }
+
+    // Send email (use Arabic or English based on lang)
+    const emailSent =
+      lang === "ar"
+        ? await sendContactUsEmail(name, email, message, contactEmail)
+        : await sendContactUsEmailEN(name, email, message, contactEmail);
+
+    if (!emailSent) {
+      return res.status(500).json({
+        success: false,
+        message:
+          lang === "ar"
+            ? "حدث خطأ أثناء إرسال الرسالة. يرجى المحاولة لاحقاً"
+            : "An error occurred while sending the message. Please try again later",
+      });
+    }
 
     res.json({
       success: true,
-      data: currencyExchanges,
+      message:
+        lang === "ar"
+          ? "تم إرسال رسالتك بنجاح. سنتواصل معك قريباً"
+          : "Your message has been sent successfully. We will contact you soon",
     });
   } catch (error) {
-    console.error("Get currency exchanges error:", error);
+    console.error("Send contact message error:", error);
     res.status(500).json({
       success: false,
       message: "Internal server error",

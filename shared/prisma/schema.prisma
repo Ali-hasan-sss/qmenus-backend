@@ -231,6 +231,7 @@ model OrderItem {
   id                String            @id @default(cuid())
   quantity          Int
   price             Decimal           @db.Decimal(10, 2)
+  discount          Decimal?          @db.Decimal(5, 2) // Discount percentage (0-100), stored when order is created
   notes             String?
   extras            Json?
   customItemName    String?
@@ -414,24 +415,28 @@ model Activity {
 }
 
 model PasswordReset {
-  id        String   @id @default(cuid())
-  email     String
-  resetCode String
-  expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id            String    @id @default(cuid())
+  email         String
+  resetCode     String
+  expiresAt     DateTime
+  used          Boolean   @default(false)
+  attemptCount  Int       @default(0)
+  lastAttemptAt DateTime?
+  createdAt     DateTime  @default(now())
 
   @@map("password_resets")
 }
 
 model EmailVerification {
-  email      String    @id
-  code       String
-  expiresAt  DateTime
-  verified   Boolean   @default(false)
-  verifiedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  email         String    @id
+  code          String
+  expiresAt     DateTime
+  verified      Boolean   @default(false)
+  verifiedAt    DateTime?
+  attemptCount  Int       @default(0) // Track number of verification code requests
+  lastAttemptAt DateTime? // Track last verification code request time
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   @@map("email_verifications")
 }

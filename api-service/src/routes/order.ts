@@ -8,6 +8,7 @@ import {
   requireRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
+import { getClientIp } from "../helpers/ipHelpers";
 import {
   createOrderSchema,
   updateOrderStatusSchema,
@@ -50,7 +51,71 @@ const getExtrasNamesForNotes = (
   return extrasNames;
 };
 
-// Helper function to calculate taxes
+// Helper function to extract taxes from tax-inclusive price
+// Since prices in menu items are tax-inclusive, we need to reverse-calculate:
+// If price = 100 and tax = 5%, then:
+// - priceWithoutTax = 100 / (1 + 0.05) = 95.24
+// - taxAmount = 100 - 95.24 = 4.76
+// OR: taxAmount = priceWithoutTax * 0.05 = 95.24 * 0.05 = 4.76
+const extractTaxesFromInclusivePrice = async (
+  restaurantId: string,
+  taxInclusivePrice: number
+): Promise<{ priceWithoutTax: number; taxes: any[]; totalTaxAmount: number }> => {
+  try {
+    const settings = await prisma.restaurantSettings.findUnique({
+      where: { restaurantId },
+    });
+
+    if (!settings || !settings.taxes) {
+      return { priceWithoutTax: taxInclusivePrice, taxes: [], totalTaxAmount: 0 };
+    }
+
+    const taxesConfig = settings.taxes as any;
+    if (!Array.isArray(taxesConfig) || taxesConfig.length === 0) {
+      return { priceWithoutTax: taxInclusivePrice, taxes: [], totalTaxAmount: 0 };
+    }
+
+    // Calculate total tax percentage
+    const totalTaxPercentage = taxesConfig.reduce((sum: number, tax: any) => {
+      if (tax && tax.percentage !== undefined) {
+        return sum + Number(tax.percentage);
+      }
+      return sum;
+    }, 0);
+
+    // Extract price without tax: priceWithoutTax = taxInclusivePrice / (1 + totalTaxPercentage/100)
+    const priceWithoutTax = taxInclusivePrice / (1 + totalTaxPercentage / 100);
+
+    // Calculate individual tax amounts based on priceWithoutTax
+    const calculatedTaxes: any[] = [];
+    let totalTaxAmount = 0;
+
+    for (const tax of taxesConfig) {
+      if (tax && tax.name && tax.percentage !== undefined) {
+        const taxAmount = (priceWithoutTax * tax.percentage) / 100;
+        calculatedTaxes.push({
+          name: tax.name,
+          nameAr: tax.nameAr || tax.name,
+          percentage: tax.percentage,
+          amount: Number(taxAmount.toFixed(2)),
+        });
+        totalTaxAmount += taxAmount;
+      }
+    }
+
+    return {
+      priceWithoutTax: Number(priceWithoutTax.toFixed(2)),
+      taxes: calculatedTaxes,
+      totalTaxAmount: Number(totalTaxAmount.toFixed(2)),
+    };
+  } catch (error) {
+    console.error("Error extracting taxes from inclusive price:", error);
+    return { priceWithoutTax: taxInclusivePrice, taxes: [], totalTaxAmount: 0 };
+  }
+};
+
+// Legacy function kept for backward compatibility (if needed)
+// This calculates taxes on top of a price (tax-exclusive pricing)
 const calculateTaxes = async (
   restaurantId: string,
   subtotal: number
@@ -114,14 +179,8 @@ router.post(
         notes,
       } = req.body;
 
-      // Get customer IP
-      const customerIP =
-        req.ip ||
-        req.connection.remoteAddress ||
-        (req.connection as any).socket?.remoteAddress ||
-        req.headers["x-forwarded-for"]?.toString().split(",")[0] ||
-        req.headers["x-real-ip"]?.toString() ||
-        "unknown";
+      // Get customer IP using helper function (handles proxy correctly)
+      const customerIP = getClientIp(req);
 
       // Verify restaurant exists and is active
       const restaurant = await prisma.restaurant.findFirst({
@@ -223,8 +282,31 @@ router.post(
         }
       }
 
+      // Get restaurant settings once (for tax calculation)
+      const settings = await prisma.restaurantSettings.findUnique({
+        where: { restaurantId },
+      });
+      
+      // Calculate total tax percentage
+      let totalTaxPercentage = 0;
+      if (settings && settings.taxes) {
+        const taxesConfig = settings.taxes as any;
+        if (Array.isArray(taxesConfig) && taxesConfig.length > 0) {
+          totalTaxPercentage = taxesConfig.reduce((sum: number, tax: any) => {
+            if (tax && tax.percentage !== undefined) {
+              return sum + Number(tax.percentage);
+            }
+            return sum;
+          }, 0);
+        }
+      }
+
       // Validate menu items and calculate total
-      let totalPrice = 0;
+      // We need to track both:
+      // - totalPriceInclusive: Sum of all tax-inclusive prices (for storage)
+      // - totalPriceWithoutTax: Sum of all prices without tax (for subtotal calculation)
+      let totalPriceInclusive = 0;
+      let totalPriceWithoutTax = 0;
       const orderItems = [];
 
       for (const item of items) {
@@ -256,11 +338,78 @@ router.post(
           });
         }
 
-        // Calculate base price with discount
-        let itemPrice = Number(menuItem.price);
-        if (menuItem.discount && menuItem.discount > 0) {
-          itemPrice = itemPrice * (1 - menuItem.discount / 100);
+        // ============================================
+        // TAX-INCLUSIVE PRICING: EXTRACT TAXES FIRST, THEN APPLY DISCOUNT
+        // ============================================
+        // Step 1: menuItem.price is TAX-INCLUSIVE (includes taxes)
+        // Step 2: Extract price without tax from tax-inclusive price
+        // Step 3: Apply discount to price without tax
+        // Step 4: Store final tax-inclusive price after discount
+        const originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
+        
+        // Get discount from menuItem (at order creation time)
+        // IMPORTANT: menuItem.discount can be a Decimal from Prisma, so we need to convert it properly
+        let discountValue = 0;
+        try {
+          if (menuItem.discount !== null && menuItem.discount !== undefined) {
+            // Handle both number and Decimal types from Prisma
+            let discountNum: number;
+            
+            // Try toNumber() first (Prisma Decimal)
+            if (typeof menuItem.discount === 'object' && menuItem.discount !== null) {
+              if ('toNumber' in menuItem.discount && typeof (menuItem.discount as any).toNumber === 'function') {
+                discountNum = (menuItem.discount as any).toNumber();
+              } else if ('toString' in menuItem.discount && typeof (menuItem.discount as any).toString === 'function') {
+                discountNum = parseFloat((menuItem.discount as any).toString());
+              } else {
+                discountNum = Number(menuItem.discount);
+              }
+            } else if (typeof menuItem.discount === 'number') {
+              discountNum = menuItem.discount;
+            } else if (typeof menuItem.discount === 'string') {
+              discountNum = parseFloat(menuItem.discount);
+            } else {
+              discountNum = Number(menuItem.discount);
+            }
+            
+            // Validate and set discount value
+            if (!isNaN(discountNum) && isFinite(discountNum) && discountNum >= 0 && discountNum <= 100) {
+              discountValue = discountNum;
+            }
+          }
+        } catch (error) {
+          console.error(`[Order Creation] Error converting discount for item ${menuItem.name}:`, error);
         }
+        
+        // Debug: Log discount information
+        console.log(`[Order Creation] Item: ${menuItem.name}, menuItem.discount (raw): ${JSON.stringify(menuItem.discount)}, menuItem.discount (type): ${typeof menuItem.discount}, discountValue: ${discountValue}, originalPriceInclusive: ${originalPriceInclusive}`);
+        console.log(`[Order Creation] Full menuItem object:`, JSON.stringify(menuItem, null, 2));
+        
+        // Extract price without tax from tax-inclusive price
+        // Calculate price without tax: priceWithoutTax = taxInclusivePrice / (1 + totalTaxPercentage/100)
+        let priceWithoutTax = totalTaxPercentage > 0
+          ? originalPriceInclusive / (1 + totalTaxPercentage / 100)
+          : originalPriceInclusive;
+        
+        // Apply discount to price WITHOUT tax
+        if (discountValue > 0 && discountValue <= 100) {
+          const priceBeforeDiscount = priceWithoutTax;
+          priceWithoutTax = priceWithoutTax * (1 - discountValue / 100);
+          console.log(`[Order Creation] Applied discount ${discountValue}%: priceWithoutTax ${priceBeforeDiscount} -> ${priceWithoutTax}`);
+        } else {
+          console.log(`[Order Creation] No discount applied (discountValue: ${discountValue})`);
+        }
+        
+        // Calculate final tax-inclusive price after discount
+        // This is what we store in item.price (tax-inclusive, after discount)
+        const finalPriceInclusive = totalTaxPercentage > 0
+          ? priceWithoutTax * (1 + totalTaxPercentage / 100)
+          : priceWithoutTax;
+        
+        console.log(`[Order Creation] finalPriceInclusive: ${finalPriceInclusive} (from priceWithoutTax: ${priceWithoutTax}, totalTaxPercentage: ${totalTaxPercentage})`);
+        
+        // Use finalPriceInclusive as itemPrice for further calculations
+        let itemPrice = finalPriceInclusive;
 
         // Calculate extras price
         let extrasPrice = 0;
@@ -286,9 +435,34 @@ router.post(
           });
         }
 
-        // Total price including extras
-        const itemTotal = (itemPrice + extrasPrice) * item.quantity;
-        totalPrice += itemTotal;
+        // ============================================
+        // CALCULATE ITEM TOTALS (TAX-INCLUSIVE PRICING MODEL)
+        // ============================================
+        // Step 1: Extract tax from original price (before discount) to get price without tax
+        // Step 2: Apply discount to price without tax
+        // Step 3: Calculate final tax-inclusive price after discount (for storage as item.price)
+        // Step 4: Accumulate subtotal (sum of prices without tax AFTER discount) and total (sum of tax-inclusive prices)
+        
+        // For subtotal: Use price WITHOUT tax AFTER discount (this is what we calculated in priceWithoutTax above)
+        // This ensures subtotal = sum of prices without tax after discounts are applied
+        // Extras are also tax-inclusive, so extract tax from extras price
+        const extrasPriceWithoutTax = totalTaxPercentage > 0
+          ? extrasPrice / (1 + totalTaxPercentage / 100)
+          : extrasPrice;
+        // Subtotal contribution: price without tax AFTER discount (already calculated above in priceWithoutTax)
+        const itemTotalWithoutTaxForSubtotal = (priceWithoutTax + extrasPriceWithoutTax) * item.quantity;
+        
+        // Total price per item: finalPriceInclusive (tax-inclusive, after discount) + extrasPrice
+        // Note: extrasPrice is assumed to be tax-inclusive (same as menu item prices)
+        // This is what we store as item.price (tax-inclusive, after discount)
+        const itemTotalInclusive = (itemPrice + extrasPrice) * item.quantity; // Tax-inclusive total for this item (after discount)
+        
+        // Accumulate totals
+        totalPriceInclusive += itemTotalInclusive; // For storage (tax-inclusive, after discount)
+        totalPriceWithoutTax += itemTotalWithoutTaxForSubtotal; // For subtotal calculation (price without tax, after discount)
+
+        // Debug logging to verify calculations
+        console.log(`[Order Creation] Item: ${menuItem.name}, Original Price: ${originalPriceInclusive}, Discount: ${discountValue}%, Price Without Tax: ${priceWithoutTax}, Final Price Inclusive: ${itemPrice}, Item Total Inclusive: ${itemTotalInclusive}, Item Total Without Tax: ${itemTotalWithoutTaxForSubtotal}, Quantity: ${item.quantity}, Stored item.price: ${itemPrice + extrasPrice}`);
 
         // Add extras details to notes
         let finalNotes = item.notes || "";
@@ -305,10 +479,21 @@ router.post(
           }
         }
 
+        // ============================================
+        // STORE ORDER ITEM WITH DISCOUNT (FROZEN AT CREATION)
+        // ============================================
+        // IMPORTANT: item.price = tax-inclusive price AFTER discount (frozen at order creation)
+        //   - This is what customers see and pay (tax-inclusive, after discount)
+        // IMPORTANT: item.discount = discount percentage at order creation (frozen, not linked to menuItem.discount)
+        // This ensures that future changes to menuItem.discount won't affect this order
+        // Note: item.price includes taxes - for invoice display, we'll extract taxes from totalPrice
+        // Store item.price as tax-inclusive price (after discount + extras)
+        // This is what customers see and pay
         orderItems.push({
           menuItemId: menuItem.id,
           quantity: item.quantity,
-          price: itemPrice + extrasPrice, // Store the final price per item
+          price: itemPrice + extrasPrice, // Tax-inclusive price per item (AFTER discount + extras) - FROZEN at order creation
+          discount: discountValue > 0 && discountValue <= 100 ? discountValue : null, // Discount % at order creation (0-100) - FROZEN, stored with order item
           notes: finalNotes,
           extras: item.extras,
           kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
@@ -318,24 +503,48 @@ router.post(
       // Get currency from restaurant
       const restaurantCurrency = restaurant.currency || "USD";
 
-      // Calculate taxes
-      const subtotal = totalPrice;
-      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
-        restaurantId,
-        subtotal
-      );
-      const finalTotal = subtotal + totalTaxAmount;
+      // ============================================
+      // TAX-INCLUSIVE PRICING: CALCULATE SUBTOTAL AND TAXES
+      // ============================================
+      // According to tax-inclusive pricing model:
+      // 1. Extract tax from each item's original price to get price without tax
+      // 2. Subtotal = sum of all prices WITHOUT tax (after discounts, if any)
+      // 3. Calculate taxes on subtotal (each tax percentage applied to subtotal without tax)
+      // 4. Total Price = sum of all tax-inclusive prices (after discount, if any)
+      //
+      // Example: Hamburger 2000, Sandwich 2000, Taxes: 5% + 5% (total 10%)
+      //   - Price without tax: 2000 / 1.10 = 1818.18 each
+      //   - Subtotal: 1818.18 + 1818.18 = 3636.36 (without tax)
+      //   - Tax 1 (5%): 3636.36 * 0.05 = 181.82
+      //   - Tax 2 (5%): 3636.36 * 0.05 = 181.82
+      //   - Total Price: 3636.36 + 181.82 + 181.82 = 4000 (tax-inclusive, matches sum of original prices)
+      console.log(`[Order Creation] Total Tax Percentage: ${totalTaxPercentage}, Total Price (without tax for subtotal): ${totalPriceWithoutTax}, Total Price (tax-inclusive): ${totalPriceInclusive}`);
+      
+      // Final total = totalPriceInclusive (what customer sees - tax-inclusive)
+      // This is the sum of original item prices (27000 in the example)
+      // NOTE: subtotal and taxes are NOT stored - they will be calculated in frontend for display only
+      const finalTotal = totalPriceInclusive; 
+      
+      console.log(`[Order Creation] Total Price (tax-inclusive): ${finalTotal}`);
 
-      // Create order with items
+      // ============================================
+      // CREATE ORDER IN DATABASE (TAX-INCLUSIVE PRICING)
+      // ============================================
+      // Store order with:
+      // - totalPrice: TAX-INCLUSIVE total (sum of original item prices) - what customer sees and pays
+      // - items: Each item has item.price (tax-inclusive, after discount) and item.discount (frozen at order creation)
+      // IMPORTANT: 
+      //   - item.price is TAX-INCLUSIVE (includes taxes) - stored as entered in menu
+      //   - totalPrice is TAX-INCLUSIVE (equals sum of all item.price * quantity)
+      //   - subtotal and taxes are NOT stored - calculated in frontend for display only
+      //   - All prices are FROZEN at order creation - future changes to menuItem.discount or menuItem.price won't affect this order
       const order = await prisma.order.create({
         data: {
           restaurantId,
           orderType,
           qrCodeId: qrCode?.id,
           tableNumber: orderType === "DINE_IN" ? tableNumber : null,
-          subtotal,
-          taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
-          totalPrice: finalTotal,
+          totalPrice: finalTotal, // Total price TAX-INCLUSIVE (what customer sees and pays)
           currency: restaurantCurrency, // Use restaurant currency
           customerName,
           customerPhone,
@@ -343,7 +552,7 @@ router.post(
           customerIP,
           notes,
           items: {
-            create: orderItems,
+            create: orderItems, // Each item has price (after discount) and discount % - both frozen at order creation
           },
         },
         include: {
@@ -374,27 +583,25 @@ router.post(
       // Check if this is a quick order (created by cashier)
       const isQuickOrder = tableNumber === "QUICK";
 
-      // Create notification for new order
-      const notificationTitle = isQuickOrder
-        ? `Quick Order - Cashier`
-        : orderType === "DINE_IN"
-        ? `New Order - Table ${tableNumber}`
-        : `New Delivery Order`;
-      const notificationBody = isQuickOrder
-        ? `Quick order created by cashier. ${items.length} items ordered.`
-        : orderType === "DINE_IN"
-        ? `New dine-in order received for table ${tableNumber}. ${items.length} items ordered.`
-        : `New delivery order from ${customerName}. ${items.length} items ordered.`;
+      // Create notification for new order (skip notifications for quick orders)
+      if (!isQuickOrder) {
+        const notificationTitle = orderType === "DINE_IN"
+          ? `New Order - Table ${tableNumber}`
+          : `New Delivery Order`;
+        const notificationBody = orderType === "DINE_IN"
+          ? `New dine-in order received for table ${tableNumber}. ${items.length} items ordered.`
+          : `New delivery order from ${customerName}. ${items.length} items ordered.`;
 
-      const notification = await prisma.notification.create({
-        data: {
-          restaurantId,
-          title: notificationTitle,
-          body: notificationBody,
-          type: "NEW_ORDER",
-          orderId: order.id,
-        },
-      });
+        const notification = await prisma.notification.create({
+          data: {
+            restaurantId,
+            title: notificationTitle,
+            body: notificationBody,
+            type: "NEW_ORDER",
+            orderId: order.id,
+          },
+        });
+      }
 
       // Notify socket-service via HTTP for real-time broadcast
       try {
@@ -570,46 +777,39 @@ router.get("/track/:orderId", async (req, res): Promise<any> => {
       });
     }
 
-    // Calculate subtotal and taxes if not present (for old orders)
-    let orderSubtotal: number = order.subtotal ? Number(order.subtotal) : 0;
-    let orderTaxes = order.taxes;
-    let orderTotalPrice: number = order.totalPrice
-      ? Number(order.totalPrice)
-      : 0;
-
-    if (!order.subtotal || !order.taxes) {
-      // Calculate subtotal from items
-      const itemsSubtotal = order.items.reduce((sum: number, item: any) => {
-        return sum + Number(item.price) * item.quantity;
-      }, 0);
-
-      orderSubtotal = itemsSubtotal;
-
-      // Calculate taxes
-      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
-        order.restaurantId,
-        itemsSubtotal
-      );
-
-      orderTaxes = calculatedTaxes.length > 0 ? calculatedTaxes : null;
-      orderTotalPrice = itemsSubtotal + totalTaxAmount;
-
-      // Update order in database if subtotal or taxes are missing
-      if (!order.subtotal || !order.taxes) {
-        await prisma.order.update({
-          where: { id: order.id },
-          data: {
-            subtotal: orderSubtotal,
-            taxes: orderTaxes || undefined,
-            totalPrice: orderTotalPrice,
-          },
-        });
+    // Calculate subtotal and taxes from totalPrice for display only (NOT stored in database)
+    // NOTE: subtotal and taxes are calculated in frontend from totalPrice for display only
+    // Here we calculate them for backward compatibility with old orders that might have these fields
+    const orderTotalPrice = order.totalPrice ? Number(order.totalPrice) : 0;
+    
+    // Calculate subtotal and taxes from totalPrice (for display only, not stored)
+    const settings = await prisma.restaurantSettings.findUnique({
+      where: { restaurantId: order.restaurantId },
+    });
+    
+    let totalTaxPercentage = 0;
+    if (settings && settings.taxes) {
+      const taxesConfig = settings.taxes as any;
+      if (Array.isArray(taxesConfig) && taxesConfig.length > 0) {
+        totalTaxPercentage = taxesConfig.reduce((sum: number, tax: any) => {
+          if (tax && tax.percentage !== undefined) {
+            return sum + Number(tax.percentage);
+          }
+          return sum;
+        }, 0);
       }
-    } else {
-      // Convert Decimal to number for response
-      orderSubtotal = Number(orderSubtotal);
-      orderTotalPrice = Number(orderTotalPrice);
     }
+    
+    // Calculate subtotal and taxes from totalPrice (for display only)
+    const orderSubtotal = totalTaxPercentage > 0
+      ? orderTotalPrice / (1 + totalTaxPercentage / 100)
+      : orderTotalPrice;
+    
+    const { taxes: calculatedTaxes } = await calculateTaxes(
+      order.restaurantId,
+      orderSubtotal
+    );
+    const orderTaxes = calculatedTaxes.length > 0 ? calculatedTaxes : null;
     res.json({
       success: true,
       data: {
@@ -715,6 +915,9 @@ router.get(
         },
       });
 
+      // Use orders as-is - totalPrice is already calculated and stored correctly
+      // For COMPLETED orders, totalPrice is locked at completion time
+      // For non-completed orders, totalPrice is calculated at order creation with discounts
       const total = await prisma.order.count({
         where: whereClause,
       });
@@ -1418,8 +1621,8 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       );
     }
 
-    // Validate and calculate new items
-    let currentSubtotal = Number(order.subtotal || order.totalPrice);
+    // VAT-INCLUSIVE PRICING: Calculate totalPrice (tax-inclusive sum of all items)
+    let totalPrice = Number(order.totalPrice ?? 0);
     const orderItems = [];
 
     for (const item of items) {
@@ -1451,13 +1654,90 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
         });
       }
 
-      // Calculate base price with discount
-      let itemPrice = Number(menuItem.price);
-      if (menuItem.discount && menuItem.discount > 0) {
-        itemPrice = itemPrice * (1 - menuItem.discount / 100);
+      // ============================================
+      // TAX-INCLUSIVE PRICING: EXTRACT TAXES FIRST, THEN APPLY DISCOUNT
+      // ============================================
+      // Step 1: menuItem.price is TAX-INCLUSIVE (includes taxes)
+      // Step 2: Extract price without tax from tax-inclusive price
+      // Step 3: Apply discount to price without tax
+      // Step 4: Store final tax-inclusive price after discount
+      const originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
+      
+      // Get restaurant settings for tax calculation
+      const settings = await prisma.restaurantSettings.findUnique({
+        where: { restaurantId: order.restaurantId },
+      });
+      
+      // Calculate total tax percentage
+      let totalTaxPercentage = 0;
+      if (settings && settings.taxes) {
+        const taxesConfig = settings.taxes as any;
+        if (Array.isArray(taxesConfig) && taxesConfig.length > 0) {
+          totalTaxPercentage = taxesConfig.reduce((sum: number, tax: any) => {
+            if (tax && tax.percentage !== undefined) {
+              return sum + Number(tax.percentage);
+            }
+            return sum;
+          }, 0);
+        }
       }
+      
+      // Get discount from menuItem (at order creation time)
+      // IMPORTANT: menuItem.discount can be a Decimal from Prisma, so we need to convert it properly
+      let discountValue = 0;
+      if (menuItem.discount !== null && menuItem.discount !== undefined) {
+        // Handle both number and Decimal types from Prisma
+        let discountNum: number;
+        
+        if (typeof menuItem.discount === 'number') {
+          discountNum = menuItem.discount;
+        } else if (typeof menuItem.discount === 'object' && menuItem.discount !== null) {
+          // Prisma Decimal type has toString() and toNumber() methods
+          if ('toNumber' in menuItem.discount && typeof (menuItem.discount as any).toNumber === 'function') {
+            discountNum = (menuItem.discount as any).toNumber();
+          } else if ('toString' in menuItem.discount && typeof (menuItem.discount as any).toString === 'function') {
+            discountNum = parseFloat((menuItem.discount as any).toString());
+          } else {
+            discountNum = Number(menuItem.discount);
+          }
+        } else {
+          // String or other type
+          discountNum = Number(menuItem.discount);
+        }
+        
+        // Validate and set discount value
+        if (!isNaN(discountNum) && discountNum >= 0 && discountNum <= 100) {
+          discountValue = discountNum;
+        }
+      }
+      
+      console.log(`[Add Items] Item: ${menuItem.name}, menuItem.discount (raw): ${menuItem.discount}, discountValue: ${discountValue}, originalPriceInclusive: ${originalPriceInclusive}`);
+      
+      // Extract price without tax from tax-inclusive price
+      // Calculate price without tax: priceWithoutTax = taxInclusivePrice / (1 + totalTaxPercentage/100)
+      let priceWithoutTax = totalTaxPercentage > 0
+        ? originalPriceInclusive / (1 + totalTaxPercentage / 100)
+        : originalPriceInclusive;
+      
+      // Apply discount to price WITHOUT tax
+      if (discountValue > 0 && discountValue <= 100) {
+        const priceBeforeDiscount = priceWithoutTax;
+        priceWithoutTax = priceWithoutTax * (1 - discountValue / 100);
+        console.log(`[Add Items] Applied discount ${discountValue}%: priceWithoutTax ${priceBeforeDiscount} -> ${priceWithoutTax}`);
+      } else {
+        console.log(`[Add Items] No discount applied (discountValue: ${discountValue})`);
+      }
+      
+      // Calculate final tax-inclusive price after discount
+      // This is what we store in item.price (tax-inclusive, after discount)
+      const finalPriceInclusive = totalTaxPercentage > 0
+        ? priceWithoutTax * (1 + totalTaxPercentage / 100)
+        : priceWithoutTax;
+      
+      // Use finalPriceInclusive as itemPrice for further calculations
+      let itemPrice = finalPriceInclusive;
 
-      // Calculate extras price
+      // Calculate extras price (assumed tax-inclusive)
       let extrasPrice = 0;
       if (item.extras && typeof item.extras === "object") {
         Object.values(item.extras).forEach((extraGroup: any) => {
@@ -1481,9 +1761,9 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
         });
       }
 
-      // Total price including extras
-      const itemTotal = (itemPrice + extrasPrice) * item.quantity;
-      currentSubtotal += itemTotal;
+      // itemTotalWithTax = (itemPrice + extrasPrice) * quantity (tax-inclusive)
+      const itemTotalWithTax = (itemPrice + extrasPrice) * item.quantity;
+      totalPrice += itemTotalWithTax; // Accumulate tax-inclusive total
 
       // Add extras details to notes
       let finalNotes = item.notes || "";
@@ -1498,11 +1778,27 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
         }
       }
 
+      // ============================================
+      // STORE ORDER ITEM WITH DISCOUNT (FROZEN AT CREATION)
+      // ============================================
+      // IMPORTANT: item.price = tax-inclusive price AFTER discount (frozen at order creation)
+      //   - This is what customers see and pay (tax-inclusive, after discount)
+      // IMPORTANT: item.discount = discount percentage at order creation (frozen, not linked to menuItem.discount)
+      // This ensures that future changes to menuItem.discount won't affect this order
+      // Note: item.price includes taxes - for invoice display, we'll extract taxes from totalPrice
+      // Store item.price as tax-inclusive price (after discount + extras)
+      // This is what customers see and pay
+      const finalItemPrice = itemPrice + extrasPrice;
+      const finalDiscountValue = discountValue > 0 && discountValue <= 100 ? discountValue : null;
+      
+      console.log(`[Add Items] Storing item - menuItem: ${menuItem.name}, finalItemPrice: ${finalItemPrice}, finalDiscountValue: ${finalDiscountValue}, discountValue: ${discountValue}`);
+      
       orderItems.push({
         orderId: order.id,
         menuItemId: menuItem.id,
         quantity: item.quantity,
-        price: itemPrice + extrasPrice, // Store the final price per item
+        price: finalItemPrice, // Tax-inclusive price per item (AFTER discount + extras) - FROZEN at order creation
+        discount: finalDiscountValue, // Discount % at order creation (0-100) - FROZEN, stored with order item
         notes: finalNotes,
         extras: item.extras,
         kitchenItemStatus: "PENDING" as any, // New items start as PENDING (waiting) - TODO: Use enum after regenerating Prisma Client
@@ -1514,19 +1810,12 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       data: orderItems,
     });
 
-    // Recalculate taxes with new subtotal
-    const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
-      order.restaurantId,
-      currentSubtotal
-    );
-    const finalTotal = currentSubtotal + totalTaxAmount;
-
-    // Update order with new subtotal, taxes, and total
+    // Update order with new totalPrice only
+    // NOTE: subtotal and taxes are NOT stored - they will be calculated in frontend for display only
+    // totalPrice = tax-inclusive price (what customer sees and pays)
     // If order was COMPLETED, change status to PREPARING
     const updateData: any = {
-      subtotal: currentSubtotal,
-      taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
-      totalPrice: finalTotal,
+      totalPrice: totalPrice, // Tax-inclusive (what customer sees and pays)
     };
 
     if (shouldChangeStatusToPreparing) {
@@ -1674,17 +1963,18 @@ router.post(
         });
       }
 
-      // Calculate new total
-      const itemTotal = Number(price) * Number(quantity);
-      const currentSubtotal =
-        Number(order.subtotal || order.totalPrice) + itemTotal;
+      // VAT-INCLUSIVE PRICING: price is tax-inclusive (what user sees)
+      const itemTotalWithTax = Number(price) * Number(quantity);
+      
+      // totalPrice = what user sees (tax-inclusive sum of all items)
+      const totalPrice = Number(order.totalPrice ?? 0) + itemTotalWithTax;
 
       // Add custom item directly to order (WITHOUT creating a menu item)
       await prisma.orderItem.create({
         data: {
           orderId: order.id,
           quantity: Number(quantity),
-          price: Number(price),
+          price: Number(price), // Tax-inclusive price (what user sees)
           notes: notes || null,
           isCustomItem: true,
           customItemName: name,
@@ -1694,20 +1984,13 @@ router.post(
         },
       });
 
-      // Recalculate taxes with new subtotal
-      const { taxes: calculatedTaxes, totalTaxAmount } = await calculateTaxes(
-        restaurantId,
-        currentSubtotal
-      );
-      const finalTotal = currentSubtotal + totalTaxAmount;
-
-      // Update order with new subtotal, taxes, and total
+      // Update order with new totalPrice only
+      // NOTE: subtotal and taxes are NOT stored - they will be calculated in frontend for display only
+      // totalPrice = tax-inclusive price (what customer sees)
       const updatedOrder = await prisma.order.update({
         where: { id },
         data: {
-          subtotal: currentSubtotal,
-          taxes: calculatedTaxes.length > 0 ? calculatedTaxes : undefined,
-          totalPrice: finalTotal,
+          totalPrice: totalPrice, // Tax-inclusive (what customer sees and pays)
         },
         include: {
           items: {
@@ -1783,12 +2066,20 @@ router.put(
         });
       }
 
+      // If order is being completed, recalculate and lock totalPrice from items
+      // This ensures discounts applied at order creation are included, and the price is fixed
+      // Note: If discount was added to menuItem AFTER order creation, it won't be applied
+      const updateData: any = {
+        status,
+        cashierId: req.user!.id,
+      };
+      
+      // NOTE: subtotal and taxes are NOT stored - they will be calculated in frontend for display only
+      // totalPrice is already stored and doesn't need to be updated here
+
       const updatedOrder = await prisma.order.update({
         where: { id },
-        data: {
-          status,
-          cashierId: req.user!.id,
-        },
+        data: updateData,
         include: {
           items: {
             include: {

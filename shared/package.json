@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
+    "@types/nodemailer": "^7.0.5",
     "bcryptjs": "^2.4.3",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "nodemailer": "^7.0.12"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

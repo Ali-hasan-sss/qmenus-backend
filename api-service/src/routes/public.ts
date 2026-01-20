@@ -495,10 +495,12 @@ router.get("/restaurant/:restaurantId", async (req, res): Promise<any> => {
       });
     }
 
-    if (!restaurant.subscriptions) {
+    // Check if restaurant has active subscription (array might be empty)
+    if (!restaurant.subscriptions || restaurant.subscriptions.length === 0) {
       return res.status(403).json({
         success: false,
-        message: "Restaurant subscription is not active",
+        message: "Restaurant subscription has expired. Please contact the restaurant.",
+        messageAr: "انتهى اشتراك المطعم. يرجى الاتصال بالمطعم.",
       });
     }
 

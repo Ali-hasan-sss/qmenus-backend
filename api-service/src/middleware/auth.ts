@@ -124,3 +124,74 @@ export const requireRestaurant = (
   }
   return next();
 };
+
+// Middleware to check if restaurant is active and has active subscription
+export const requireActiveRestaurant = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    console.log("🏪 RequireActiveRestaurant middleware hit for:", req.url);
+    
+    if (!req.user?.restaurantId) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied. Restaurant access required.",
+      });
+    }
+
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: req.user.restaurantId },
+      include: {
+        subscriptions: {
+          where: {
+            status: "ACTIVE",
+          },
+        },
+      },
+    });
+
+    if (!restaurant) {
+      return res.status(404).json({
+        success: false,
+        message: "Restaurant not found",
+      });
+    }
+
+    // Check if restaurant is active
+    if (!restaurant.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your restaurant account has been deactivated. Please contact support or renew your subscription.",
+        messageAr: "تم تعطيل حساب المطعم الخاص بك. يرجى الاتصال بالدعم أو تجديد اشتراكك.",
+        requiresSubscription: true,
+      });
+    }
+
+    // Check if restaurant has active subscription
+    if (!restaurant.subscriptions || restaurant.subscriptions.length === 0) {
+      // Auto-deactivate restaurant if no active subscription
+      await prisma.restaurant.update({
+        where: { id: req.user.restaurantId },
+        data: { isActive: false },
+      });
+      
+      return res.status(403).json({
+        success: false,
+        message: "Your subscription has expired. Please renew your subscription to continue using the service.",
+        messageAr: "انتهى اشتراكك. يرجى تجديد اشتراكك لمتابعة استخدام الخدمة.",
+        requiresSubscription: true,
+      });
+    }
+
+    console.log("✅ Restaurant is active and has active subscription");
+    return next();
+  } catch (error) {
+    console.error("❌ RequireActiveRestaurant error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};

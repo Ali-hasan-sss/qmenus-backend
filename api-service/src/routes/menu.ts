@@ -4,6 +4,7 @@ import {
   authenticate,
   AuthRequest,
   requireRestaurant,
+  requireActiveRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
 import {
@@ -24,6 +25,7 @@ router.get(
   "/",
   authenticate,
   requireRestaurant,
+  requireActiveRestaurant,
   async (req: AuthRequest, res): Promise<any> => {
     try {
       const restaurantId = req.user!.restaurantId!;

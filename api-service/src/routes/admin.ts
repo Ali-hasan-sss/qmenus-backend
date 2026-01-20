@@ -1155,6 +1155,17 @@ router.post("/subscriptions", async (req: AuthRequest, res): Promise<any> => {
       },
     });
 
+    // Activate restaurant if it was deactivated
+    if (!subscription.restaurant.isActive) {
+      await prisma.restaurant.update({
+        where: { id: restaurantId },
+        data: { isActive: true },
+      });
+      console.log(
+        `✅ Restaurant ${subscription.restaurant.name} (${restaurantId}) reactivated due to new subscription`
+      );
+    }
+
     // Create invoice for the subscription (marked as PAID since admin created it)
     try {
       await createInvoice(

@@ -4,6 +4,7 @@ import {
   authenticate,
   AuthRequest,
   requireRestaurant,
+  requireActiveRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
 import { updateRestaurantSchema } from "../validators/restaurantValidators";
@@ -16,6 +17,7 @@ router.get(
   "/",
   authenticate,
   requireRestaurant,
+  requireActiveRestaurant,
   async (req: AuthRequest, res): Promise<any> => {
     try {
       const restaurant = await prisma.restaurant.findUnique({
@@ -63,6 +65,7 @@ router.put(
   "/",
   authenticate,
   requireRestaurant,
+  requireActiveRestaurant,
   validateRequest(updateRestaurantSchema),
   async (req: AuthRequest, res): Promise<any> => {
     try {

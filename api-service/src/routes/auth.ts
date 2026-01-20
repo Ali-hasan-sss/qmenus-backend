@@ -506,6 +506,9 @@ export const getProfile = async (
         restaurants: {
           include: {
             subscriptions: {
+              where: {
+                status: "ACTIVE",
+              },
               include: {
                 plan: true,
               },
@@ -520,6 +523,52 @@ export const getProfile = async (
         success: false,
         message: "User not found",
       });
+    }
+
+    // Auto-reactivate restaurant if it has active subscription but is inactive
+    if (user.restaurants?.[0]) {
+      const restaurant = user.restaurants[0];
+      const hasActiveSubscription = restaurant.subscriptions && restaurant.subscriptions.length > 0;
+      
+      if (!restaurant.isActive && hasActiveSubscription) {
+        await prisma.restaurant.update({
+          where: { id: restaurant.id },
+          data: { isActive: true },
+        });
+        console.log(
+          `✅ Restaurant ${restaurant.name} (${restaurant.id}) auto-reactivated due to active subscription`
+        );
+        
+        // Refetch restaurant with updated status
+        const updatedRestaurant = await prisma.restaurant.findUnique({
+          where: { id: restaurant.id },
+          include: {
+            subscriptions: {
+              where: {
+                status: "ACTIVE",
+              },
+              include: {
+                plan: true,
+              },
+            },
+          },
+        });
+        
+        return res.json({
+          success: true,
+          data: {
+            user: {
+              id: user.id,
+              email: user.email,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              role: user.role,
+              emailVerified: user.emailVerified,
+              restaurant: updatedRestaurant,
+            },
+          },
+        });
+      }
     }
 
     res.json({

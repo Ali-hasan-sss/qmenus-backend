@@ -34,10 +34,11 @@ import { getClientIp } from "../helpers/ipHelpers";
 
 const router = express.Router();
 
-// Rate limiting for login: 5 attempts per 5 minutes per IP
+// Rate limiting for login: 5 attempts per 5 minutes per IP+UserAgent
+// Using IP + User-Agent allows different devices on the same network to have separate rate limits
 const loginRateLimiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 5, // Limit each IP to 5 requests per windowMs
+  max: 5, // Limit each IP+UserAgent combination to 5 requests per windowMs
   message: {
     success: false,
     message: "Too many login attempts. Please try again after 5 minutes.",
@@ -46,23 +47,36 @@ const loginRateLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   keyGenerator: (req: express.Request) => {
-    // Use IP address for rate limiting (handles proxy)
+    // Use IP address + User-Agent for rate limiting
+    // This allows different devices on the same network to have separate rate limits
     const clientIp = getClientIp(req);
+    const userAgent = req.headers["user-agent"] || "unknown";
+    
+    // Create a combination key from IP + User-Agent
+    // Limit user agent length to avoid very long keys
+    const userAgentShort = userAgent.substring(0, 100);
+    const rateLimitKey = `${clientIp}:${userAgentShort}`;
+    
     console.log("🔒 Rate Limiter Key Generator:", {
       clientIp,
+      userAgent: userAgentShort,
+      rateLimitKey: rateLimitKey.substring(0, 120), // Log truncated version for readability
       "cf-connecting-ip": req.headers["cf-connecting-ip"],
       "x-forwarded-for": req.headers["x-forwarded-for"],
       "x-real-ip": req.headers["x-real-ip"],
       "req.ip": req.ip,
-      "req.socket.remoteAddress": req.socket?.remoteAddress,
     });
-    return clientIp;
+    
+    return rateLimitKey;
   },
   skipSuccessfulRequests: false, // Count all requests, including successful ones
   skipFailedRequests: false, // Count failed requests too
   handler: (req: express.Request, res: Response) => {
     const clientIp = getClientIp(req);
-    console.log("⚠️ Rate limit exceeded for IP:", clientIp, {
+    const userAgent = req.headers["user-agent"] || "unknown";
+    console.log("⚠️ Rate limit exceeded for IP+UserAgent:", {
+      clientIp,
+      userAgent: userAgent.substring(0, 100),
       "cf-connecting-ip": req.headers["cf-connecting-ip"],
       "x-forwarded-for": req.headers["x-forwarded-for"],
       "x-real-ip": req.headers["x-real-ip"],

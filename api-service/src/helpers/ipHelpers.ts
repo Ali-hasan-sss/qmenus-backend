@@ -16,21 +16,46 @@ import express from "express";
  */
 export const getClientIp = (req: express.Request): string => {
   // Check for proxy headers (in order of priority)
+  // Priority 1: x-forwarded-for header (most reliable when properly configured)
   const forwarded = req.headers["x-forwarded-for"];
   if (forwarded) {
     // x-forwarded-for can contain multiple IPs in a chain
     // Format: "client-ip, proxy1-ip, proxy2-ip"
     // We want the first one (original client IP)
-    const ips = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    return ips.split(",")[0].trim();
+    const forwardedString = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    const firstIp = forwardedString.split(",")[0].trim();
+    
+    // Validate IP format (basic check)
+    if (firstIp && firstIp !== "" && firstIp !== "unknown") {
+      return firstIp;
+    }
   }
   
+  // Priority 2: x-real-ip header (set by Nginx when configured)
   const realIp = req.headers["x-real-ip"];
   if (realIp) {
-    return Array.isArray(realIp) ? realIp[0] : realIp;
+    const realIpString = Array.isArray(realIp) ? realIp[0] : realIp;
+    if (realIpString && realIpString !== "" && realIpString !== "unknown") {
+      return realIpString;
+    }
   }
   
-  // Fallback to req.ip (requires app.set('trust proxy', true))
-  // or req.socket.remoteAddress
-  return req.ip || req.socket.remoteAddress || "unknown";
+  // Priority 3: req.ip (works with trust proxy enabled)
+  if (req.ip && req.ip !== "" && req.ip !== "unknown") {
+    return req.ip;
+  }
+  
+  // Priority 4: req.socket.remoteAddress (fallback)
+  if (req.socket?.remoteAddress) {
+    return req.socket.remoteAddress;
+  }
+  
+  // Last resort: return unknown
+  console.warn("⚠️ Could not determine client IP from request:", {
+    "x-forwarded-for": req.headers["x-forwarded-for"],
+    "x-real-ip": req.headers["x-real-ip"],
+    "req.ip": req.ip,
+    "req.socket.remoteAddress": req.socket?.remoteAddress,
+  });
+  return "unknown";
 };

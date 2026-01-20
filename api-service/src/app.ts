@@ -30,8 +30,9 @@ import { notFound } from "./middleware/notFound";
 
 const app = express();
 
-// Trust proxy for production
-app.set("trust proxy", 1);
+// Trust proxy for production (trust all proxies in the chain)
+// This is necessary when behind Nginx reverse proxy
+app.set("trust proxy", true);
 
 // CORS configuration - supports multiple origins
 const isProd = env.NODE_ENV === "production";

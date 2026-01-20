@@ -108,6 +108,7 @@ export const createPlan = async (
       description,
       descriptionAr,
       type,
+      billingPeriod,
       price,
       currency,
       duration,
@@ -125,6 +126,7 @@ export const createPlan = async (
         description,
         descriptionAr,
         type,
+        billingPeriod: billingPeriod || "MONTHLY",
         price,
         currency: currency || "USD",
         duration,
@@ -968,6 +970,7 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
       description,
       descriptionAr,
       type,
+      billingPeriod,
       price,
       duration,
       maxTables,
@@ -987,6 +990,7 @@ router.put("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
         description,
         descriptionAr,
         type,
+        billingPeriod,
         price,
         duration,
         maxTables,
@@ -1017,6 +1021,33 @@ router.delete("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
   try {
     const { id } = req.params;
 
+    // Check if plan exists
+    const plan = await prisma.plan.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            subscriptions: true,
+          },
+        },
+      },
+    });
+
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        message: "Plan not found",
+      });
+    }
+
+    // Check if plan has active subscriptions
+    if (plan._count.subscriptions > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete plan. This plan has ${plan._count.subscriptions} active subscription(s). Please cancel or delete all subscriptions first.`,
+      });
+    }
+
     await prisma.plan.delete({
       where: { id },
     });
@@ -1025,8 +1056,17 @@ router.delete("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
       success: true,
       message: "Plan deleted successfully",
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Delete plan error:", error);
+    
+    // Handle foreign key constraint error
+    if (error.code === "P2003") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete plan. This plan is associated with one or more subscriptions. Please cancel or delete all subscriptions first.",
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Internal server error",

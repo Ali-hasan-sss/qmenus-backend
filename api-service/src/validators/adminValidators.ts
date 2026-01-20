@@ -23,6 +23,13 @@ export const createPlanSchema = Joi.object({
       "any.only": "Type must be one of: BASIC, PREMIUM, ENTERPRISE",
       "any.required": "Type is required",
     }),
+  billingPeriod: Joi.string()
+    .valid("MONTHLY", "YEARLY")
+    .optional()
+    .default("MONTHLY")
+    .messages({
+      "any.only": "Billing period must be one of: MONTHLY, YEARLY",
+    }),
   price: Joi.number().positive().precision(2).required().messages({
     "number.base": "Price must be a number",
     "number.positive": "Price must be positive",
@@ -93,6 +100,12 @@ export const updatePlanSchema = Joi.object({
     .optional()
     .messages({
       "any.only": "Type must be one of: BASIC, PREMIUM, ENTERPRISE",
+    }),
+  billingPeriod: Joi.string()
+    .valid("MONTHLY", "YEARLY")
+    .optional()
+    .messages({
+      "any.only": "Billing period must be one of: MONTHLY, YEARLY",
     }),
   price: Joi.number().positive().precision(2).optional().messages({
     "number.base": "Price must be a number",

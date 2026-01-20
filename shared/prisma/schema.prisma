@@ -67,28 +67,29 @@ model Restaurant {
 }
 
 model Plan {
-  id                String         @id @default(cuid())
+  id                String            @id @default(cuid())
   name              String
   nameAr            String?
   description       String?
   descriptionAr     String?
   type              PlanType
-  price             Decimal        @db.Decimal(10, 2)
-  currency          String         @default("USD")
+  billingPeriod     PlanBillingPeriod @default(MONTHLY)
+  price             Decimal           @db.Decimal(10, 2)
+  currency          String            @default("USD")
   duration          Int
   maxTables         Int
-  maxMenus          Int            @default(1)
-  maxCategories     Int            @default(1)
-  maxItems          Int            @default(5)
-  canCustomizeTheme Boolean        @default(false)
+  maxMenus          Int               @default(1)
+  maxCategories     Int               @default(1)
+  maxItems          Int               @default(5)
+  canCustomizeTheme Boolean           @default(false)
   features          String[]
-  isActive          Boolean        @default(true)
-  isFree            Boolean        @default(false)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  isActive          Boolean           @default(true)
+  isFree            Boolean           @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
   creatorId         String
   invoices          Invoice[]
-  creator           User           @relation("PlanCreator", fields: [creatorId], references: [id])
+  creator           User              @relation("PlanCreator", fields: [creatorId], references: [id])
   subscriptions     Subscription[]
 
   @@map("plans")
@@ -475,6 +476,11 @@ enum PlanType {
   BASIC
   PREMIUM
   ENTERPRISE
+}
+
+enum PlanBillingPeriod {
+  MONTHLY
+  YEARLY
 }
 
 enum NotificationType {

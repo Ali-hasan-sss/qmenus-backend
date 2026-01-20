@@ -1,39 +1,237 @@
-# PowerShell script to clean Docker resources
+root@mail:~# cat nano /etc/nginx/sites-available/qmenus-backend
+cat: nano: No such file or directory
+# Default server - reject all unmatched domains (including www.qmenussy.com)
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server http2;
+    server_name _;
+    
+    # Use existing certificate (won't be validated but prevents errors) 
+    ssl_certificate /etc/letsencrypt/live/api.qmenussy.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.qmenussy.com/privkey.pem;
 
-Write-Host "🧹 Cleaning Docker resources..." -ForegroundColor Yellow
-
-# Stop all containers
-Write-Host "`n📦 Stopping all containers..." -ForegroundColor Cyan
-$containers = docker ps -aq
-if ($containers) {
-    docker stop $containers 2>$null
+    # Close connection without response for unmatched domains
+    return 444;
 }
 
-# Remove all stopped containers
-Write-Host "🗑️ Removing stopped containers..." -ForegroundColor Cyan
-docker container prune -f
+upstream api_backend {
+    server 127.0.0.1:5000;
+    keepalive 32;
+}
 
-# Remove all unused images
-Write-Host "🖼️ Removing unused images..." -ForegroundColor Cyan
-docker image prune -a -f
+upstream socket_backend {
+    server 127.0.0.1:5001;
+    keepalive 32;
+}
 
-# Remove all unused volumes
-Write-Host "💾 Removing unused volumes..." -ForegroundColor Cyan
-docker volume prune -f
+# Rate limiting zones
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=100r/m;      
+limit_req_zone $binary_remote_addr zone=socket_limit:10m rate=200r/m;   
 
-# Remove all unused networks
-Write-Host "🌐 Removing unused networks..." -ForegroundColor Cyan
-docker network prune -f
+# HTTP server for api.qmenussy.com - redirect to HTTPS
+server {
+    listen 80;
+    server_name api.qmenussy.com;
 
-# Remove build cache
-Write-Host "🗂️ Removing build cache..." -ForegroundColor Cyan
-docker builder prune -a -f
+    # Allow Let's Encrypt challenges
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
 
-# Show disk space
-Write-Host "`n💿 Docker disk usage:" -ForegroundColor Green
-docker system df
+    # Redirect all other HTTP traffic to HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
 
-Write-Host "`n✅ Cleanup complete!" -ForegroundColor Green
-Write-Host "`n💡 Tip: If you still have space issues, run:" -ForegroundColor Yellow
-Write-Host "   docker system prune -a --volumes -f" -ForegroundColor Cyan
+# HTTPS server for api.qmenussy.com
+server {
+    listen 443 ssl http2;
+    server_name api.qmenussy.com;
 
+    # SSL Configuration (Let's Encrypt certificates)
+    ssl_certificate /etc/letsencrypt/live/api.qmenussy.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.qmenussy.com/privkey.pem;
+
+    # SSL Security Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;     
+
+    # Logging
+    access_log /var/log/nginx/api-access.log;
+    error_log /var/log/nginx/api-error.log;
+
+    # Client body size limit (for file uploads)
+    client_max_body_size 50M;
+    client_body_buffer_size 128k;
+
+    # Timeouts
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+
+    # API Routes
+location /api {
+    limit_req zone=api_limit burst=20 nodelay;
+
+    proxy_pass http://api_backend;
+    proxy_http_version 1.1;
+
+    # Headers
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;        
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Port $server_port;
+
+    # WebSocket support
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+
+    # CRITICAL: Preserve Set-Cookie header from backend
+    proxy_pass_header Set-Cookie;
+
+    # CRITICAL: Preserve CORS headers from backend (backend handles CORS)
+    proxy_pass_header Access-Control-Allow-Origin;
+    proxy_pass_header Access-Control-Allow-Credentials;
+    proxy_pass_header Access-Control-Allow-Methods;
+    proxy_pass_header Access-Control-Allow-Headers;
+    proxy_pass_header Access-Control-Expose-Headers;
+
+    # Buffering - turn off to allow proper header passing
+    proxy_buffering off;
+    proxy_request_buffering off;
+ }
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://api_backend/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;    
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    # Certbot challenge for renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+
+    # Default location
+    location / {
+        return 200 "API Service - Use /api for API endpoints\n";        
+        add_header Content-Type text/plain;
+    }
+}
+
+# HTTP server for socket.qmenussy.com - redirect to HTTPS
+server {
+    listen 80;
+    server_name socket.qmenussy.com;
+
+    # Allow Let's Encrypt challenges
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+
+    # Redirect all other HTTP traffic to HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+
+# HTTPS server for socket.qmenussy.com
+server {
+    listen 443 ssl http2;
+    server_name socket.qmenussy.com;
+
+    # SSL Configuration (using same certificate as API)
+    ssl_certificate /etc/letsencrypt/live/api.qmenussy.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.qmenussy.com/privkey.pem;
+
+    # SSL Security Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "no-referrer-when-downgrade" always;     
+
+    # Logging
+    access_log /var/log/nginx/socket-access.log;
+    error_log /var/log/nginx/socket-error.log;
+
+    # Client body size limit
+    client_max_body_size 50M;
+    client_body_buffer_size 128k;
+
+    # Timeouts - longer for Socket.IO
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 86400s;
+    proxy_read_timeout 86400s;
+
+    # Health check endpoint
+    location /health {
+        proxy_pass http://socket_backend/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;    
+        proxy_set_header X-Forwarded-Proto $scheme;
+        access_log off;
+    }
+
+    # Socket.IO Routes
+    location / {
+        limit_req zone=socket_limit burst=50 nodelay;
+
+        proxy_pass http://socket_backend;
+        proxy_http_version 1.1;
+
+        # Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;    
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+
+        # WebSocket support for Socket.IO
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Socket.IO specific settings
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 86400;
+    }
+
+    # Certbot challenge for renewal
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        try_files $uri =404;
+    }
+}
+root@mail:~#

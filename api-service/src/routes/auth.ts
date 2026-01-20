@@ -47,11 +47,27 @@ const loginRateLimiter = rateLimit({
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   keyGenerator: (req: express.Request) => {
     // Use IP address for rate limiting (handles proxy)
-    return getClientIp(req);
+    const clientIp = getClientIp(req);
+    console.log("🔒 Rate Limiter Key Generator:", {
+      clientIp,
+      "cf-connecting-ip": req.headers["cf-connecting-ip"],
+      "x-forwarded-for": req.headers["x-forwarded-for"],
+      "x-real-ip": req.headers["x-real-ip"],
+      "req.ip": req.ip,
+      "req.socket.remoteAddress": req.socket?.remoteAddress,
+    });
+    return clientIp;
   },
   skipSuccessfulRequests: false, // Count all requests, including successful ones
   skipFailedRequests: false, // Count failed requests too
   handler: (req: express.Request, res: Response) => {
+    const clientIp = getClientIp(req);
+    console.log("⚠️ Rate limit exceeded for IP:", clientIp, {
+      "cf-connecting-ip": req.headers["cf-connecting-ip"],
+      "x-forwarded-for": req.headers["x-forwarded-for"],
+      "x-real-ip": req.headers["x-real-ip"],
+      "req.ip": req.ip,
+    });
     // Custom handler to ensure proper JSON response with code
     res.status(429).json({
       success: false,
@@ -361,6 +377,16 @@ export const loginUser = async (
 ): Promise<any> => {
   try {
     const { email: rawEmail, password } = req.body;
+
+    // Log client IP for debugging (helps diagnose proxy issues)
+    const clientIp = getClientIp(req);
+    console.log("🔐 Login attempt:", {
+      email: rawEmail,
+      clientIp,
+      "x-forwarded-for": req.headers["x-forwarded-for"],
+      "x-real-ip": req.headers["x-real-ip"],
+      "req.ip": req.ip,
+    });
 
     // Normalize email: convert to lowercase and trim whitespace
     const email = rawEmail ? rawEmail.trim().toLowerCase() : "";

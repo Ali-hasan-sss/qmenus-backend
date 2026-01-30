@@ -100,7 +100,7 @@ router.get(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Delete category (alias under /api/menu)
@@ -147,7 +147,7 @@ router.delete(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Create category (alias under /api/menu)
@@ -210,7 +210,7 @@ router.post(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Get active categories for the authenticated restaurant (dashboard usage)
@@ -256,7 +256,7 @@ router.get(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Reorder categories - MUST be before /categories/:id route
@@ -283,8 +283,8 @@ router.put(
             data: {
               sortOrder: category.sortOrder,
             },
-          })
-        )
+          }),
+        ),
       );
 
       res.json({
@@ -298,7 +298,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Update category (alias under /api/menu)
@@ -359,7 +359,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Update menu name
@@ -405,7 +405,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Create menu item
@@ -493,7 +493,7 @@ router.post(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Get items for a specific category
@@ -566,7 +566,7 @@ router.get(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Get all menu items for restaurant
@@ -622,7 +622,100 @@ router.get(
         message: "Internal server error",
       });
     }
-  }
+  },
+);
+
+// Apply discount to all menu items
+router.post(
+  "/discount/all",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+      const { discount } = req.body;
+
+      if (typeof discount !== "number" || discount < 0 || discount > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "Discount must be a number between 0 and 100",
+        });
+      }
+
+      const result = await prisma.menuItem.updateMany({
+        where: {
+          category: {
+            menu: { restaurantId },
+          },
+        },
+        data: { discount },
+      });
+
+      res.json({
+        success: true,
+        message: `Discount of ${discount}% applied to all menu items`,
+        data: { updatedCount: result.count },
+      });
+    } catch (error) {
+      console.error("Apply discount to all items error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  },
+);
+
+// Apply discount to items in a specific category
+router.post(
+  "/discount/category/:categoryId",
+  authenticate,
+  requireRestaurant,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const restaurantId = req.user!.restaurantId!;
+      const { categoryId } = req.params;
+      const { discount } = req.body;
+
+      if (typeof discount !== "number" || discount < 0 || discount > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "Discount must be a number between 0 and 100",
+        });
+      }
+
+      const category = await prisma.category.findFirst({
+        where: {
+          id: categoryId,
+          menu: { restaurantId },
+        },
+      });
+
+      if (!category) {
+        return res.status(404).json({
+          success: false,
+          message: "Category not found",
+        });
+      }
+
+      const result = await prisma.menuItem.updateMany({
+        where: { categoryId },
+        data: { discount },
+      });
+
+      res.json({
+        success: true,
+        message: `Discount of ${discount}% applied to category items`,
+        data: { updatedCount: result.count },
+      });
+    } catch (error) {
+      console.error("Apply discount to category error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  },
 );
 
 // Reorder items
@@ -658,8 +751,8 @@ router.put(
             data: {
               sortOrder: item.sortOrder,
             },
-          })
-        )
+          }),
+        ),
       );
 
       return res.json({
@@ -673,7 +766,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Update menu item
@@ -762,7 +855,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Toggle menu item availability
@@ -810,7 +903,7 @@ router.put(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 // Delete menu item
@@ -854,7 +947,7 @@ router.delete(
         message: "Internal server error",
       });
     }
-  }
+  },
 );
 
 export default router;

@@ -659,14 +659,13 @@ export async function sendPasswordResetEmailEN(
   });
 }
 
-// Send contact us email
+// Send contact us email (contact info is phone number)
 export async function sendContactUsEmail(
   name: string,
-  email: string,
+  phone: string,
   message: string,
   toEmail?: string
 ): Promise<boolean> {
-  // Priority: 1. CONTACT_RECIPIENT_EMAIL (Gmail), 2. provided toEmail, 3. CONTACT_EMAIL, 4. EMAIL_FROM
   const recipientEmail =
     CONTACT_RECIPIENT_EMAIL ||
     toEmail ||
@@ -690,8 +689,8 @@ export async function sendContactUsEmail(
             <strong style="color: #333;">الاسم:</strong> ${name}
           </p>
           <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">
-            <strong style="color: #333;">البريد الإلكتروني:</strong> 
-            <a href="mailto:${email}" style="color: #f97316; text-decoration: none;">${email}</a>
+            <strong style="color: #333;">رقم الهاتف:</strong> 
+            <a href="tel:${phone}" style="color: #f97316; text-decoration: none;">${phone}</a>
           </p>
         </div>
         
@@ -705,7 +704,7 @@ export async function sendContactUsEmail(
             © 2024 QMenus. جميع الحقوق محفوظة.
           </p>
           <p style="font-size: 11px; color: #999; margin-top: 10px;">
-            يمكنك الرد مباشرة على هذا البريد للتواصل مع ${name}
+            للتواصل مع ${name} اتصل على ${phone}
           </p>
         </div>
       </div>
@@ -716,18 +715,16 @@ export async function sendContactUsEmail(
     to: recipientEmail,
     subject: `رسالة جديدة من نموذج اتصل بنا - ${name}`,
     html,
-    replyTo: email, // Allow replying directly to the sender
   });
 }
 
-// Send contact us email (English version)
+// Send contact us email (English version, contact info is phone number)
 export async function sendContactUsEmailEN(
   name: string,
-  email: string,
+  phone: string,
   message: string,
   toEmail?: string
 ): Promise<boolean> {
-  // Priority: 1. CONTACT_RECIPIENT_EMAIL (Gmail), 2. provided toEmail, 3. CONTACT_EMAIL, 4. EMAIL_FROM
   const recipientEmail =
     CONTACT_RECIPIENT_EMAIL ||
     toEmail ||
@@ -751,8 +748,8 @@ export async function sendContactUsEmailEN(
             <strong style="color: #333;">Name:</strong> ${name}
           </p>
           <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">
-            <strong style="color: #333;">Email:</strong> 
-            <a href="mailto:${email}" style="color: #f97316; text-decoration: none;">${email}</a>
+            <strong style="color: #333;">Phone:</strong> 
+            <a href="tel:${phone}" style="color: #f97316; text-decoration: none;">${phone}</a>
           </p>
         </div>
         
@@ -766,7 +763,7 @@ export async function sendContactUsEmailEN(
             © 2024 QMenus. All rights reserved.
           </p>
           <p style="font-size: 11px; color: #999; margin-top: 10px;">
-            You can reply directly to this email to contact ${name}
+            To contact ${name}, call ${phone}
           </p>
         </div>
       </div>
@@ -777,6 +774,5 @@ export async function sendContactUsEmailEN(
     to: recipientEmail,
     subject: `New Contact Form Message - ${name}`,
     html,
-    replyTo: email, // Allow replying directly to the sender
   });
 }

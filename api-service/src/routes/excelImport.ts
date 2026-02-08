@@ -581,6 +581,411 @@ router.post(
 );
 
 /**
+ * Export full menu backup as Excel (all properties preserved)
+ * GET /api/excel-import/backup
+ */
+router.get(
+  "/backup",
+  authenticate,
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const userId = (req as any).user.id;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { restaurants: true },
+      });
+
+      if (!user || !user.restaurants || user.restaurants.length === 0) {
+        return res.status(404).json({ error: "لم يتم العثور على المطعم" });
+      }
+
+      const restaurantId = user.restaurants[0].id;
+
+      const menu = await prisma.menu.findFirst({
+        where: { restaurantId },
+        include: {
+          categories: {
+            orderBy: { sortOrder: "asc" },
+            include: {
+              items: {
+                orderBy: { sortOrder: "asc" },
+                include: { kitchenSection: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!menu || !menu.categories.length) {
+        return res.status(404).json({
+          error: "لا توجد قائمة أو فئات للنسخ الاحتياطي",
+        });
+      }
+
+      const workbook = XLSX.utils.book_new();
+
+      const backupHeaders = [
+        "backup_version",
+        "category_name",
+        "category_name_ar",
+        "category_description",
+        "category_description_ar",
+        "category_image",
+        "category_sort_order",
+        "category_is_active",
+        "item_name",
+        "item_name_ar",
+        "item_description",
+        "item_description_ar",
+        "item_price",
+        "item_image",
+        "item_sort_order",
+        "item_is_available",
+        "item_discount",
+        "item_extras_json",
+        "item_kitchen_section_name",
+        "item_allergens",
+        "item_calories",
+        "item_cooking_method",
+        "item_dietary_info",
+        "item_ingredients",
+        "item_is_featured",
+        "item_nutritional_info",
+        "item_preparation_time",
+        "item_serving_size",
+        "item_spice_level",
+        "item_tags",
+      ];
+
+      const rows: any[][] = [backupHeaders];
+
+      for (const cat of menu.categories) {
+        if (cat.items.length === 0) {
+          rows.push([
+            "1.0",
+            cat.name,
+            cat.nameAr || "",
+            cat.description || "",
+            cat.descriptionAr || "",
+            cat.image || "",
+            cat.sortOrder,
+            cat.isActive ? 1 : 0,
+            ...Array(18).fill(""),
+          ]);
+        } else {
+          for (let i = 0; i < cat.items.length; i++) {
+            const item = cat.items[i];
+            const extrasStr =
+              item.extras && typeof item.extras === "object"
+                ? JSON.stringify(item.extras)
+                : "";
+            rows.push([
+              i === 0 ? "1.0" : "",
+              i === 0 ? cat.name : "",
+              i === 0 ? (cat.nameAr || "") : "",
+              i === 0 ? (cat.description || "") : "",
+              i === 0 ? (cat.descriptionAr || "") : "",
+              i === 0 ? (cat.image || "") : "",
+              i === 0 ? cat.sortOrder : "",
+              i === 0 ? (cat.isActive ? 1 : 0) : "",
+              item.name,
+              item.nameAr || "",
+              item.description || "",
+              item.descriptionAr || "",
+              Number(item.price),
+              item.image || "",
+              item.sortOrder,
+              item.isAvailable ? 1 : 0,
+              item.discount || 0,
+              extrasStr,
+              item.kitchenSection?.name || "",
+              item.allergens || "",
+              item.calories ?? "",
+              item.cookingMethod || "",
+              item.dietaryInfo || "",
+              item.ingredients || "",
+              item.isFeatured ? 1 : 0,
+              item.nutritionalInfo || "",
+              item.preparationTime ?? "",
+              item.servingSize || "",
+              item.spiceLevel ?? "",
+              item.tags || "",
+            ]);
+          }
+        }
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+      worksheet["!cols"] = backupHeaders.map(() => ({ wch: 18 }));
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Menu Backup");
+
+      const excelBuffer = XLSX.write(workbook, {
+        type: "buffer",
+        bookType: "xlsx",
+      });
+
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=menu_backup_${new Date().toISOString().split("T")[0]}.xlsx`
+      );
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      res.send(excelBuffer);
+    } catch (error) {
+      console.error("Error exporting backup:", error);
+      return res.status(500).json({
+        error: "خطأ في تصدير النسخة الاحتياطية",
+        details: error instanceof Error ? error.message : "خطأ غير معروف",
+      });
+    }
+  }
+);
+
+/**
+ * Restore menu from backup Excel file
+ * POST /api/excel-import/restore-backup
+ */
+router.post(
+  "/restore-backup",
+  authenticate,
+  validatePlanLimits.checkBulkImportLimits,
+  upload.single("excelFile"),
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "لم يتم رفع أي ملف" });
+      }
+
+      const userId = (req as any).user.id;
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { restaurants: true },
+      });
+
+      if (!user || !user.restaurants || user.restaurants.length === 0) {
+        return res.status(404).json({ error: "لم يتم العثور على المطعم" });
+      }
+
+      const restaurantId = user.restaurants[0].id;
+
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+      if (jsonData.length < 2) {
+        return res.status(400).json({
+          error: "ملف النسخة الاحتياطية فارغ أو غير صالح",
+        });
+      }
+
+      const headers = jsonData[0] as string[];
+      const hasBackupVersion = headers.includes("backup_version");
+      if (!hasBackupVersion) {
+        return res.status(400).json({
+          error:
+            "هذا الملف ليس نسخة احتياطية صالحة. استخدم ملف النسخة الاحتياطية المصدر من التصدير.",
+        });
+      }
+
+      const dataRows = jsonData.slice(1) as any[][];
+      const categoriesMap = new Map<
+        string,
+        {
+          name: string;
+          nameAr: string | null;
+          description: string | null;
+          descriptionAr: string | null;
+          image: string | null;
+          sortOrder: number;
+          isActive: boolean;
+          items: any[];
+        }
+      >();
+
+      for (const row of dataRows) {
+        if (!row || row.length === 0) continue;
+
+        const rowData: Record<string, any> = {};
+        headers.forEach((h, i) => {
+          rowData[h] = row[i];
+        });
+
+        const catName = String(rowData.category_name || "").trim();
+        if (!catName) continue;
+
+        const categoryKey = `${catName}_${rowData.category_name_ar || ""}`;
+        const itemName = String(rowData.item_name || "").trim();
+
+        if (!categoriesMap.has(categoryKey)) {
+          categoriesMap.set(categoryKey, {
+            name: catName,
+            nameAr: rowData.category_name_ar || null,
+            description: rowData.category_description || null,
+            descriptionAr: rowData.category_description_ar || null,
+            image: rowData.category_image || null,
+            sortOrder: parseInt(rowData.category_sort_order) || 0,
+            isActive: rowData.category_is_active === 1 || rowData.category_is_active === "1",
+            items: [],
+          });
+        }
+
+        if (itemName) {
+          const price = parseFloat(rowData.item_price) || 0;
+          let extras = null;
+          if (rowData.item_extras_json) {
+            try {
+              extras = JSON.parse(rowData.item_extras_json);
+            } catch {
+              // ignore
+            }
+          }
+
+          categoriesMap.get(categoryKey)!.items.push({
+            name: itemName,
+            nameAr: rowData.item_name_ar || null,
+            description: rowData.item_description || null,
+            descriptionAr: rowData.item_description_ar || null,
+            price,
+            image: rowData.item_image || null,
+            sortOrder: parseInt(rowData.item_sort_order) || 0,
+            isAvailable: rowData.item_is_available === 1 || rowData.item_is_available === "1",
+            discount: parseInt(rowData.item_discount) || 0,
+            extras,
+            kitchenSectionName: rowData.item_kitchen_section_name || null,
+            allergens: rowData.item_allergens || null,
+            calories: rowData.item_calories ? parseInt(rowData.item_calories) : null,
+            cookingMethod: rowData.item_cooking_method || null,
+            dietaryInfo: rowData.item_dietary_info || null,
+            ingredients: rowData.item_ingredients || null,
+            isFeatured: rowData.item_is_featured === 1 || rowData.item_is_featured === "1",
+            nutritionalInfo: rowData.item_nutritional_info || null,
+            preparationTime: rowData.item_preparation_time ? parseInt(rowData.item_preparation_time) : null,
+            servingSize: rowData.item_serving_size || null,
+            spiceLevel: rowData.item_spice_level ? parseInt(rowData.item_spice_level) : null,
+            tags: rowData.item_tags || null,
+          });
+        }
+      }
+
+      const planLimits = (req as any).planLimits;
+      const totalCategories = categoriesMap.size;
+      const totalItems = Array.from(categoriesMap.values()).reduce(
+        (sum, c) => sum + c.items.length,
+        0
+      );
+
+      if (totalCategories > planLimits.maxCategories) {
+        return res.status(403).json({
+          success: false,
+          message: `Cannot restore. Category limit exceeded. Limit: ${planLimits.maxCategories}, Restoring: ${totalCategories}`,
+        });
+      }
+
+      const totalItemsQuota = planLimits.maxCategories * planLimits.maxItems;
+      if (totalItems > totalItemsQuota) {
+        return res.status(403).json({
+          success: false,
+          message: `Cannot restore. Items quota exceeded. Quota: ${totalItemsQuota}, Restoring: ${totalItems}`,
+        });
+      }
+
+      const menu = await prisma.menu.findFirst({
+        where: { restaurantId },
+      });
+
+      if (!menu) {
+        return res.status(404).json({ error: "لم يتم العثور على القائمة" });
+      }
+
+      const kitchenSections = await prisma.kitchenSection.findMany({
+        where: { restaurantId },
+      });
+      const sectionByName = new Map(
+        kitchenSections.map((s: { name: string; id: string }) => [s.name, s.id])
+      );
+
+      await prisma.$transaction(async (tx: any) => {
+        await tx.menuItem.deleteMany({
+          where: { restaurantId },
+        });
+        await tx.category.deleteMany({
+          where: { menuId: menu.id },
+        });
+
+        for (const [, catData] of categoriesMap) {
+          const category = await tx.category.create({
+            data: {
+              name: catData.name,
+              nameAr: catData.nameAr,
+              description: catData.description,
+              descriptionAr: catData.descriptionAr,
+              image: catData.image,
+              sortOrder: catData.sortOrder,
+              isActive: catData.isActive,
+              menuId: menu.id,
+              restaurantId,
+            },
+          });
+
+          for (let i = 0; i < catData.items.length; i++) {
+            const it = catData.items[i];
+            const kitchenSectionId = it.kitchenSectionName
+              ? sectionByName.get(it.kitchenSectionName) || null
+              : null;
+
+            await tx.menuItem.create({
+              data: {
+                name: it.name,
+                nameAr: it.nameAr,
+                description: it.description,
+                descriptionAr: it.descriptionAr,
+                price: it.price,
+                image: it.image,
+                sortOrder: it.sortOrder,
+                isAvailable: it.isAvailable,
+                discount: it.discount,
+                extras: it.extras,
+                categoryId: category.id,
+                restaurantId,
+                kitchenSectionId,
+                allergens: it.allergens,
+                calories: it.calories,
+                cookingMethod: it.cookingMethod,
+                dietaryInfo: it.dietaryInfo,
+                ingredients: it.ingredients,
+                isFeatured: it.isFeatured,
+                nutritionalInfo: it.nutritionalInfo,
+                preparationTime: it.preparationTime,
+                servingSize: it.servingSize,
+                spiceLevel: it.spiceLevel,
+                tags: it.tags,
+              },
+            });
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        message: "تم استعادة النسخة الاحتياطية بنجاح",
+        summary: {
+          categoriesRestored: totalCategories,
+          itemsRestored: totalItems,
+        },
+      });
+    } catch (error) {
+      console.error("Error restoring backup:", error);
+      res.status(500).json({
+        error: "خطأ في استعادة النسخة الاحتياطية",
+        details: error instanceof Error ? error.message : "خطأ غير معروف",
+      });
+    }
+  }
+);
+
+/**
  * Get import history
  * GET /api/excel-import/history
  */

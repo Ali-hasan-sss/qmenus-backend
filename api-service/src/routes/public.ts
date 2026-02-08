@@ -8,6 +8,163 @@ import {
 
 const router = express.Router();
 
+// List public restaurants (active + active subscription), optional search by name
+router.get("/restaurants", async (req, res): Promise<any> => {
+  try {
+    const q = (req.query.q as string)?.trim()?.toLowerCase();
+    const where: any = {
+      isActive: true,
+      subscriptions: {
+        some: {
+          status: "ACTIVE",
+        },
+      },
+    };
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { nameAr: { contains: q, mode: "insensitive" } },
+      ];
+    }
+    const restaurants = await prisma.restaurant.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        nameAr: true,
+        description: true,
+        descriptionAr: true,
+        logo: true,
+        currency: true,
+        address: true,
+        phone: true,
+      },
+      orderBy: { name: "asc" },
+      take: 50,
+    });
+    res.json({
+      success: true,
+      data: { restaurants },
+    });
+  } catch (error) {
+    console.error("List restaurants error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
+// Search menu items globally; return restaurants that have matching items
+router.get("/search/items", async (req, res): Promise<any> => {
+  try {
+    const q = (req.query.q as string)?.trim();
+    if (!q || q.length === 0) {
+      return res.json({
+        success: true,
+        data: { restaurants: [], query: q },
+      });
+    }
+    const searchTerm = q.toLowerCase();
+    const items = await prisma.menuItem.findMany({
+      where: {
+        isAvailable: true,
+        category: {
+          isActive: true,
+          menu: {
+            isActive: true,
+            restaurant: {
+              isActive: true,
+              subscriptions: {
+                some: { status: "ACTIVE" },
+              },
+            },
+          },
+        },
+        OR: [
+          { name: { contains: searchTerm, mode: "insensitive" } },
+          { nameAr: { contains: searchTerm, mode: "insensitive" } },
+          { description: { contains: searchTerm, mode: "insensitive" } },
+          { descriptionAr: { contains: searchTerm, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        nameAr: true,
+        price: true,
+        image: true,
+        restaurantId: true,
+        restaurants: {
+          select: {
+            id: true,
+            name: true,
+            nameAr: true,
+            logo: true,
+            currency: true,
+            address: true,
+            phone: true,
+          },
+        },
+      },
+      take: 200,
+    });
+    const byRestaurant = new Map<
+      string,
+      {
+        restaurant: { id: string; name: string; nameAr: string | null; logo: string | null; currency: string; address: string | null; phone: string | null };
+        matchCount: number;
+        sampleItems: Array<{ id: string; name: string; nameAr: string | null; price: any; image: string | null }>;
+      }
+    >();
+    for (const item of items) {
+      const rid = item.restaurantId;
+      const rest = item.restaurants;
+      if (!byRestaurant.has(rid)) {
+        byRestaurant.set(rid, {
+          restaurant: {
+            id: rest.id,
+            name: rest.name,
+            nameAr: rest.nameAr,
+            logo: rest.logo,
+            currency: rest.currency,
+            address: rest.address,
+            phone: rest.phone,
+          },
+          matchCount: 0,
+          sampleItems: [],
+        });
+      }
+      const entry = byRestaurant.get(rid)!;
+      entry.matchCount += 1;
+      if (entry.sampleItems.length < 5) {
+        entry.sampleItems.push({
+          id: item.id,
+          name: item.name,
+          nameAr: item.nameAr,
+          price: item.price,
+          image: item.image,
+        });
+      }
+    }
+    const restaurants = Array.from(byRestaurant.values()).map((e) => ({
+      ...e.restaurant,
+      matchCount: e.matchCount,
+      sampleItems: e.sampleItems,
+    }));
+    res.json({
+      success: true,
+      data: { restaurants, query: q },
+    });
+  } catch (error) {
+    console.error("Search items error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+});
+
 // Get all subscription plans (public)
 router.get("/plans", async (req, res): Promise<any> => {
   try {
@@ -702,10 +859,10 @@ router.get(
 // Send contact us form message
 router.post("/contact", async (req, res): Promise<any> => {
   try {
-    const { name, email, message, lang } = req.body;
+    const { name, phone, message, lang } = req.body;
 
     // Validate required fields
-    if (!name || !email || !message) {
+    if (!name || !phone || !message) {
       return res.status(400).json({
         success: false,
         message:
@@ -715,15 +872,16 @@ router.post("/contact", async (req, res): Promise<any> => {
       });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    // Validate phone: 10 digits starting with 09
+    const phoneTrimmed = String(phone).trim();
+    const phoneRegex = /^09\d{8}$/;
+    if (!phoneRegex.test(phoneTrimmed)) {
       return res.status(400).json({
         success: false,
         message:
           lang === "ar"
-            ? "البريد الإلكتروني غير صحيح"
-            : "Invalid email address",
+            ? "رقم الهاتف غير صحيح. يجب أن يكون 10 أرقام تبدأ بـ 09"
+            : "Invalid phone. Must be 10 digits starting with 09",
       });
     }
 
@@ -769,8 +927,8 @@ router.post("/contact", async (req, res): Promise<any> => {
     // Send email (use Arabic or English based on lang)
     const emailSent =
       lang === "ar"
-        ? await sendContactUsEmail(name, email, message, contactEmail)
-        : await sendContactUsEmailEN(name, email, message, contactEmail);
+        ? await sendContactUsEmail(name, phoneTrimmed, message, contactEmail)
+        : await sendContactUsEmailEN(name, phoneTrimmed, message, contactEmail);
 
     if (!emailSent) {
       return res.status(500).json({

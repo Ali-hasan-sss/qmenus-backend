@@ -63,9 +63,16 @@ export const registerSchema = Joi.object({
   }),
 
   // Step 3: Logo (optional)
-  logo: Joi.string().uri().allow("").optional().messages({
-    "string.uri": "Logo must be a valid URL",
-  }),
+  logo: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .allow("")
+    .optional()
+    .messages({
+      "alternatives.match": "Logo must be a valid URL or server path (e.g. /uploads/...)",
+    }),
 });
 
 export const loginSchema = Joi.object({

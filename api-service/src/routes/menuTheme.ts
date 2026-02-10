@@ -6,6 +6,7 @@ import {
   requireRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
+import { deleteUploadIfUnused } from "../utils/uploadCleanup";
 import {
   createMenuThemeSchema,
   updateMenuThemeSchema,
@@ -71,10 +72,13 @@ router.put(
       const restaurantId = req.user!.restaurantId!;
       const updateData = req.body;
 
-      // Remove id from DEFAULT_THEME if it exists (Prisma will generate it)
+      const existingTheme = await prisma.menuTheme.findUnique({
+        where: { restaurantId },
+        select: { backgroundImage: true, customBackgroundImage: true },
+      });
+
       const { id, ...defaultThemeWithoutId } = DEFAULT_THEME as any;
 
-      // Use upsert to create or update theme
       const theme = await prisma.menuTheme.upsert({
         where: { restaurantId },
         update: updateData,
@@ -84,6 +88,21 @@ router.put(
           restaurantId,
         },
       });
+
+      if (existingTheme) {
+        if (
+          updateData.backgroundImage !== undefined &&
+          existingTheme.backgroundImage !== updateData.backgroundImage
+        ) {
+          await deleteUploadIfUnused(prisma, existingTheme.backgroundImage);
+        }
+        if (
+          updateData.customBackgroundImage !== undefined &&
+          existingTheme.customBackgroundImage !== updateData.customBackgroundImage
+        ) {
+          await deleteUploadIfUnused(prisma, existingTheme.customBackgroundImage);
+        }
+      }
 
       res.json({
         success: true,

@@ -40,9 +40,16 @@ export const createCategorySchema = Joi.object({
   descriptionAr: Joi.string().max(500).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 500 characters",
   }),
-  image: Joi.string().uri().allow("").optional().messages({
-    "string.uri": "Image must be a valid URL",
-  }),
+  image: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .allow("")
+    .optional()
+    .messages({
+      "alternatives.match": "Image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   sortOrder: Joi.number().integer().min(0).optional().messages({
     "number.base": "Sort order must be a number",
     "number.integer": "Sort order must be an integer",
@@ -65,9 +72,16 @@ export const updateCategorySchema = Joi.object({
   descriptionAr: Joi.string().max(500).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 500 characters",
   }),
-  image: Joi.string().uri().allow("").optional().messages({
-    "string.uri": "Image must be a valid URL",
-  }),
+  image: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .allow("")
+    .optional()
+    .messages({
+      "alternatives.match": "Image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   sortOrder: Joi.number().integer().min(0).optional().messages({
     "number.base": "Sort order must be a number",
     "number.integer": "Sort order must be an integer",
@@ -96,9 +110,16 @@ export const createMenuItemSchema = Joi.object({
     "number.positive": "Price must be positive",
     "any.required": "Price is required",
   }),
-  image: Joi.string().uri().allow("").optional().messages({
-    "string.uri": "Image must be a valid URL",
-  }),
+  image: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .allow("")
+    .optional()
+    .messages({
+      "alternatives.match": "Image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   sortOrder: Joi.number().integer().min(0).optional().messages({
     "number.base": "Sort order must be a number",
     "number.integer": "Sort order must be an integer",
@@ -142,9 +163,16 @@ export const updateMenuItemSchema = Joi.object({
     "number.positive": "Price must be positive",
     "any.required": "Price is required",
   }),
-  image: Joi.string().uri().allow("").optional().messages({
-    "string.uri": "Image must be a valid URL",
-  }),
+  image: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .allow("")
+    .optional()
+    .messages({
+      "alternatives.match": "Image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   sortOrder: Joi.number().integer().min(0).optional().messages({
     "number.base": "Sort order must be a number",
     "number.integer": "Sort order must be an integer",

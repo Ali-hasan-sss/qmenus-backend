@@ -27,18 +27,13 @@ export const updateRestaurantSchema = Joi.object({
       "string.pattern.base": "Please provide a valid phone number",
     }),
   logo: Joi.string().allow("", null).optional().custom((value, helpers) => {
-    // If logo is empty string or null, it's valid
-    if (!value || value === "") {
-      return value;
-    }
-    // Otherwise, validate it's a valid URI
-    const uriPattern = /^https?:\/\/.+/;
-    if (!uriPattern.test(value)) {
-      return helpers.error("string.uri");
-    }
-    return value;
+    if (!value || value === "") return value;
+    // Allow full URL or server relative path (e.g. /uploads/...)
+    if (/^https?:\/\//.test(value)) return value;
+    if (/^\/[a-zA-Z0-9/._-]+$/.test(value)) return value;
+    return helpers.error("string.uri");
   }).messages({
-    "string.uri": "Logo must be a valid URL",
+    "string.uri": "Logo must be a valid URL or server path (e.g. /uploads/...)",
   }),
   currency: Joi.string().length(3).uppercase().optional().messages({
     "string.length": "Currency must be 3 characters long",
@@ -64,9 +59,15 @@ export const createQRCodeSchema = Joi.object({
 });
 
 export const updateThemeSchema = Joi.object({
-  backgroundImage: Joi.string().uri().optional().messages({
-    "string.uri": "Please provide a valid image URL",
-  }),
+  backgroundImage: Joi.alternatives()
+    .try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+    )
+    .optional()
+    .messages({
+      "alternatives.match": "Please provide a valid image URL or server path (e.g. /uploads/...)",
+    }),
   brightness: Joi.number().min(0).max(2).optional().messages({
     "number.min": "Brightness must be between 0 and 2",
     "number.max": "Brightness must be between 0 and 2",

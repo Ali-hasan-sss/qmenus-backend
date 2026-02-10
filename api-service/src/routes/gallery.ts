@@ -3,6 +3,7 @@ import prisma from "../../../shared/config/db";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { requireAdmin } from "../middleware/adminAuth";
 import Joi from "joi";
+import { deleteUploadIfUnused } from "../utils/uploadCleanup";
 
 const router = express.Router();
 
@@ -284,9 +285,16 @@ router.delete(
     try {
       const { id } = req.params;
 
+      const image = await prisma.gallery.findUnique({
+        where: { id },
+        select: { imageUrl: true },
+      });
+
       await prisma.gallery.delete({
         where: { id },
       });
+
+      if (image?.imageUrl) await deleteUploadIfUnused(prisma, image.imageUrl);
 
       res.json({
         success: true,

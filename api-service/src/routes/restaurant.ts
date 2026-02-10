@@ -7,6 +7,7 @@ import {
   requireActiveRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
+import { deleteUploadIfUnused } from "../utils/uploadCleanup";
 import { updateRestaurantSchema } from "../validators/restaurantValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
 
@@ -434,6 +435,11 @@ router.put(
         currency,
       } = req.body;
 
+      const existing = await prisma.restaurant.findUnique({
+        where: { id: req.user!.restaurantId },
+        select: { logo: true },
+      });
+
       const updateData: any = {
         name: name || null,
         nameAr: nameAr || null,
@@ -444,7 +450,6 @@ router.put(
         logo: logo || null,
       };
 
-      // Always update currency if provided, otherwise keep existing value
       if (currency !== undefined && currency !== null && currency !== "") {
         updateData.currency = currency;
       }
@@ -464,6 +469,10 @@ router.put(
           currency: true,
         } as any,
       });
+
+      if (existing?.logo && existing.logo !== (logo ?? null)) {
+        await deleteUploadIfUnused(prisma, existing.logo);
+      }
 
       res.json({
         success: true,

@@ -17,6 +17,7 @@ import {
   reorderCategoriesSchema,
 } from "../validators/menuValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
+import { deleteUploadIfUnused } from "../utils/uploadCleanup";
 
 const router = express.Router();
 
@@ -843,6 +844,10 @@ router.put(
         },
       });
 
+      if (menuItem.image && menuItem.image !== (image ?? null)) {
+        await deleteUploadIfUnused(prisma, menuItem.image);
+      }
+
       res.json({
         success: true,
         message: "Menu item updated successfully",
@@ -932,9 +937,11 @@ router.delete(
         });
       }
 
+      const imagePath = menuItem.image;
       await prisma.menuItem.delete({
         where: { id },
       });
+      await deleteUploadIfUnused(prisma, imagePath);
 
       res.json({
         success: true,

@@ -6,6 +6,7 @@ import {
   requireRestaurant,
 } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
+import { deleteUploadIfUnused, deleteUploadsIfUnused } from "../utils/uploadCleanup";
 import {
   createCategorySchema,
   updateCategorySchema,
@@ -205,13 +206,13 @@ router.put(
           sortOrder,
         },
         include: {
-          _count: {
-            select: {
-              items: true,
-            },
-          },
+          _count: { select: { items: true } },
         },
       });
+
+      if (category.image && category.image !== (image ?? null)) {
+        await deleteUploadIfUnused(prisma, category.image);
+      }
 
       res.json({
         success: true,
@@ -297,11 +298,8 @@ router.delete(
           menu: { restaurantId },
         },
         include: {
-          _count: {
-            select: {
-              items: true,
-            },
-          },
+          _count: { select: { items: true } },
+          items: { select: { image: true } },
         },
       });
 
@@ -312,18 +310,17 @@ router.delete(
         });
       }
 
-      // Delete category and all its items using transaction
-      await prisma.$transaction(async (tx: any) => {
-        // First, delete all items in this category
-        await tx.menuItem.deleteMany({
-          where: { categoryId: id },
-        });
+      const imagesToClean = [
+        category.image,
+        ...(category.items || []).map((i: { image: string | null }) => i.image),
+      ].filter(Boolean);
 
-        // Then delete the category
-        await tx.category.delete({
-          where: { id },
-        });
+      await prisma.$transaction(async (tx: any) => {
+        await tx.menuItem.deleteMany({ where: { categoryId: id } });
+        await tx.category.delete({ where: { id } });
       });
+
+      await deleteUploadsIfUnused(prisma, imagesToClean);
 
       res.json({
         success: true,
@@ -360,32 +357,35 @@ router.delete(
         });
       }
 
-      // Delete all categories and items using transaction
+      const categoriesWithItems = await prisma.category.findMany({
+        where: { menuId: menu.id },
+        select: { id: true, image: true, items: { select: { image: true } } },
+      });
+      const imagesToClean: (string | null)[] = [];
+      for (const c of categoriesWithItems) {
+        if (c.image) imagesToClean.push(c.image);
+        for (const item of c.items || []) {
+          if (item.image) imagesToClean.push(item.image);
+        }
+      }
+
       await prisma.$transaction(async (tx: any) => {
-        // Get all category IDs for this menu
         const categoryIds = await tx.category.findMany({
           where: { menuId: menu.id },
           select: { id: true },
         });
-
         const categoryIdList = categoryIds.map((c: { id: string }) => c.id);
-
-        // First, delete all menu items in these categories
         if (categoryIdList.length > 0) {
           await tx.menuItem.deleteMany({
-            where: {
-              categoryId: {
-                in: categoryIdList,
-              },
-            },
+            where: { categoryId: { in: categoryIdList } },
           });
         }
-
-        // Then delete all categories
         await tx.category.deleteMany({
           where: { menuId: menu.id },
         });
       });
+
+      await deleteUploadsIfUnused(prisma, imagesToClean);
 
       res.json({
         success: true,

@@ -39,10 +39,18 @@ export const createSectionSchema = Joi.object({
   descriptionAr: Joi.string().max(2000).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 2000 characters",
   }),
-  images: Joi.array().items(Joi.string().uri()).optional().messages({
-    "array.base": "Images must be an array",
-    "string.uri": "Each image must be a valid URL",
-  }),
+  images: Joi.array()
+    .items(
+      Joi.alternatives().try(
+        Joi.string().uri(),
+        Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+      )
+    )
+    .optional()
+    .messages({
+      "array.base": "Images must be an array",
+      "alternatives.match": "Each image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   attributes: Joi.array().items(sectionAttributeSchema).optional().messages({
     "array.base": "Attributes must be an array",
   }),
@@ -69,10 +77,18 @@ export const updateSectionSchema = Joi.object({
   descriptionAr: Joi.string().max(2000).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 2000 characters",
   }),
-  images: Joi.array().items(Joi.string().uri()).optional().messages({
-    "array.base": "Images must be an array",
-    "string.uri": "Each image must be a valid URL",
-  }),
+  images: Joi.array()
+    .items(
+      Joi.alternatives().try(
+        Joi.string().uri(),
+        Joi.string().pattern(/^\/[a-zA-Z0-9/._-]+$/).min(1)
+      )
+    )
+    .optional()
+    .messages({
+      "array.base": "Images must be an array",
+      "alternatives.match": "Each image must be a valid URL or server path (e.g. /uploads/...)",
+    }),
   attributes: Joi.array().items(sectionAttributeSchema).optional().messages({
     "array.base": "Attributes must be an array",
   }),

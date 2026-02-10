@@ -1,4 +1,5 @@
 import express from "express";
+import path from "path";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
@@ -10,6 +11,7 @@ import { getClientIp } from "./helpers/ipHelpers";
 
 // Import routes
 import authRoutes from "./routes/auth";
+import uploadRoutes from "./routes/upload";
 import restaurantRoutes from "./routes/restaurant";
 import menuRoutes from "./routes/menu";
 import categoryRoutes from "./routes/categories";
@@ -228,6 +230,16 @@ app.use("/api/gallery", galleryRoutes);
 app.use("/api/public", publicRoutes);
 app.use("/api/section", sectionRoutes);
 app.use("/api/kitchen", kitchenRoutes);
+
+// Serve uploaded files (relative paths like /uploads/...)
+// Allow cross-origin so frontend (e.g. localhost:3000) can display images from API (e.g. localhost:5000)
+app.use("/uploads", (_req, res, next) => {
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+});
+const uploadRoot = process.env.UPLOAD_DIR || path.join(process.cwd(), "uploads");
+app.use("/uploads", express.static(uploadRoot));
+app.use("/api/upload", uploadRoutes);
 
 // Error handling middleware
 app.use(notFound);

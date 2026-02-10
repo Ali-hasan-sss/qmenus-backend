@@ -2,6 +2,7 @@ import express from "express";
 import prisma from "../../../shared/config/db";
 import { authenticate, AuthRequest } from "../middleware/auth";
 import { validateRequest } from "../middleware/validateRequest";
+import { deleteUploadsIfUnused, isUploadPath } from "../utils/uploadCleanup";
 import {
   createSectionSchema,
   updateSectionSchema,
@@ -190,6 +191,15 @@ router.put(
         data: updateData,
       });
 
+      if (images !== undefined && existingSection.images) {
+        const oldArr = Array.isArray(existingSection.images)
+          ? (existingSection.images as string[])
+          : [];
+        const newArr = Array.isArray(images) ? images : [];
+        const removed = oldArr.filter((p: string) => !newArr.includes(p)).filter(isUploadPath);
+        await deleteUploadsIfUnused(prisma, removed);
+      }
+
       res.json({
         success: true,
         message: "Section updated successfully",
@@ -226,9 +236,15 @@ router.delete(
         });
       }
 
+      const imagesToClean = Array.isArray(existingSection.images)
+        ? (existingSection.images as string[])
+        : [];
+
       await prisma.section.delete({
         where: { id },
       });
+
+      await deleteUploadsIfUnused(prisma, imagesToClean);
 
       res.json({
         success: true,

@@ -516,14 +516,33 @@ router.get(
   }
 );
 
-// Update restaurant settings (taxes)
+// Validate defaultOrderItems shape: { menuItems: [{ menuItemId, quantity }], customServices: [{ name, nameAr?, price, quantity }] }
+function validateDefaultOrderItems(value: any): boolean {
+  if (value === null || value === undefined) return true;
+  if (typeof value !== "object") return false;
+  if (value.menuItems !== undefined) {
+    if (!Array.isArray(value.menuItems)) return false;
+    for (const item of value.menuItems) {
+      if (!item || typeof item.menuItemId !== "string" || typeof item.quantity !== "number" || item.quantity < 1) return false;
+    }
+  }
+  if (value.customServices !== undefined) {
+    if (!Array.isArray(value.customServices)) return false;
+    for (const s of value.customServices) {
+      if (!s || typeof s.name !== "string" || typeof s.price !== "number" || typeof s.quantity !== "number" || s.quantity < 1) return false;
+    }
+  }
+  return true;
+}
+
+// Update restaurant settings (taxes, defaultOrderItems)
 router.put(
   "/settings",
   authenticate,
   requireRestaurant,
   async (req: AuthRequest, res: Response): Promise<any> => {
     try {
-      const { taxes } = req.body;
+      const { taxes, defaultOrderItems } = req.body;
       const restaurantId = req.user!.restaurantId;
 
       // Validate taxes array
@@ -560,15 +579,27 @@ router.put(
         }
       }
 
-      // Upsert settings
+      if (defaultOrderItems !== undefined && !validateDefaultOrderItems(defaultOrderItems)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid defaultOrderItems format",
+        });
+      }
+
+      const updateData: { taxes?: any; defaultOrderItems?: any } = {};
+      if (taxes !== undefined) updateData.taxes = taxes;
+      if (defaultOrderItems !== undefined) updateData.defaultOrderItems = defaultOrderItems;
+
+      // Upsert settings (only update provided fields)
       const settings = await prisma.restaurantSettings.upsert({
         where: { restaurantId: restaurantId! },
-        update: {
-          taxes: taxes || [],
-        },
+        update: Object.keys(updateData).length
+          ? updateData
+          : { taxes: taxes ?? [] },
         create: {
           restaurantId: restaurantId!,
-          taxes: taxes || [],
+          taxes: taxes ?? [],
+          defaultOrderItems: defaultOrderItems ?? undefined,
         },
       });
 

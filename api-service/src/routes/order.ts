@@ -173,12 +173,15 @@ router.post(
         restaurantId,
         orderType = "DINE_IN",
         tableNumber,
-        items,
+        items: itemsFromBody,
         customerName,
         customerPhone,
         customerAddress,
         notes,
       } = req.body;
+
+      // Items to process: may be merged with default items for DINE_IN table orders
+      let items = Array.isArray(itemsFromBody) ? [...itemsFromBody] : [];
 
       // Get customer IP using helper function (handles proxy correctly)
       const customerIP = getClientIp(req);
@@ -285,10 +288,33 @@ router.post(
         }
       }
 
-      // Get restaurant settings once (for tax calculation)
+      // Get restaurant settings once (for tax calculation and default order items)
       const settings = await prisma.restaurantSettings.findUnique({
         where: { restaurantId },
       });
+
+      // For DINE_IN table orders (not QUICK), merge default menu items from settings
+      const normalizedTableNumber = orderType === "DINE_IN" ? String(tableNumber).trim() : "";
+      if (orderType === "DINE_IN" && normalizedTableNumber !== "QUICK" && settings?.defaultOrderItems) {
+        const def = settings.defaultOrderItems as { menuItems?: Array<{ menuItemId: string; quantity: number }> };
+        if (def.menuItems && def.menuItems.length > 0) {
+          const defaultItems = def.menuItems.map((m) => ({
+            menuItemId: m.menuItemId,
+            quantity: m.quantity,
+            notes: "" as string,
+            extras: {} as Record<string, unknown>,
+          }));
+          items = [...defaultItems, ...items];
+        }
+      }
+
+      // Require at least one item after merge
+      if (!items || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one item is required",
+        });
+      }
       
       // Calculate total tax percentage
       let totalTaxPercentage = 0;
@@ -541,7 +567,7 @@ router.post(
       //   - totalPrice is TAX-INCLUSIVE (equals sum of all item.price * quantity)
       //   - subtotal and taxes are NOT stored - calculated in frontend for display only
       //   - All prices are FROZEN at order creation - future changes to menuItem.discount or menuItem.price won't affect this order
-      const order = await prisma.order.create({
+      let order = await prisma.order.create({
         data: {
           restaurantId,
           orderType,
@@ -583,6 +609,63 @@ router.post(
         },
       });
 
+      // Add default custom services for DINE_IN table orders (not QUICK)
+      const defaultCustomServices = (orderType === "DINE_IN" && normalizedTableNumber !== "QUICK" && settings?.defaultOrderItems) 
+        ? (settings.defaultOrderItems as { customServices?: Array<{ name: string; nameAr?: string; price: number; quantity: number }> })?.customServices 
+        : undefined;
+      if (defaultCustomServices && defaultCustomServices.length > 0) {
+        let addedTotal = 0;
+        for (const s of defaultCustomServices) {
+          const itemTotal = Number(s.price) * Number(s.quantity);
+          addedTotal += itemTotal;
+          await prisma.orderItem.create({
+            data: {
+              orderId: order.id,
+              quantity: Number(s.quantity),
+              price: Number(s.price),
+              notes: null,
+              isCustomItem: true,
+              customItemName: s.name,
+              customItemNameAr: s.nameAr ?? s.name,
+              menuItemId: null,
+              kitchenItemStatus: "PENDING" as any,
+            },
+          });
+        }
+        const newTotal = Number(order.totalPrice ?? 0) + addedTotal;
+        await prisma.order.update({
+          where: { id: order.id },
+          data: { totalPrice: newTotal },
+        });
+        // Refetch order with full include for response and socket
+        order = await prisma.order.findUniqueOrThrow({
+          where: { id: order.id },
+          include: {
+            items: {
+              include: {
+                menuItem: {
+                  select: {
+                    id: true,
+                    name: true,
+                    nameAr: true,
+                    price: true,
+                    discount: true,
+                    extras: true,
+                    category: {
+                      select: {
+                        id: true,
+                        name: true,
+                        nameAr: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }) as any;
+      }
+
       // Check if this is a quick order (created by cashier)
       const isQuickOrder = tableNumber === "QUICK";
 
@@ -592,8 +675,8 @@ router.post(
           ? `New Order - Table ${tableNumber}`
           : `New Delivery Order`;
         const notificationBody = orderType === "DINE_IN"
-          ? `New dine-in order received for table ${tableNumber}. ${items.length} items ordered.`
-          : `New delivery order from ${customerName}. ${items.length} items ordered.`;
+          ? `New dine-in order received for table ${tableNumber}. ${order.items?.length ?? items.length} items ordered.`
+          : `New delivery order from ${customerName}. ${order.items?.length ?? items.length} items ordered.`;
 
         const notification = await prisma.notification.create({
           data: {
@@ -2028,6 +2111,43 @@ router.post(
           },
         },
       });
+
+      // Notify socket-service so customer sees the new custom item in real-time (same as add-items)
+      try {
+        const axios = require("axios");
+        const socketServiceUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
+        const qrCodeId =
+          (updatedOrder as any).qrCode?.id ?? (updatedOrder as any).qrCodeId ?? null;
+
+        await axios.post(`${socketServiceUrl}/api/emit-order-update`, {
+          order: updatedOrder,
+          updatedBy: "restaurant",
+          timestamp: new Date().toISOString(),
+          restaurantId,
+          qrCodeId,
+        });
+
+        await axios.post(`${socketServiceUrl}/api/emit-kds-update`, {
+          orderItem: {
+            id: "new-items",
+            order: updatedOrder,
+          },
+          restaurantId,
+          timestamp: new Date().toISOString(),
+          source: "restaurant",
+          orderId: updatedOrder.id,
+        });
+        console.log(
+          "✅ Socket event emitted for custom item add (customer + KDS)"
+        );
+      } catch (socketError: any) {
+        console.error(
+          "⚠️ Socket notification error (add custom item):",
+          socketError?.message || socketError
+        );
+      }
 
       res.json({
         success: true,

@@ -325,10 +325,32 @@ export const setupSocketHandlers = (io: Server) => {
           );
         }
 
-        // Get restaurant settings for tax calculation
+        // Get restaurant settings for tax calculation and default order items
         const settings = await prisma.restaurantSettings.findUnique({
           where: { restaurantId },
         });
+
+        // For DINE_IN table orders (not QUICK), merge default menu items from settings
+        const normalizedTableNumber = orderType === "DINE_IN" && tableNumber ? String(tableNumber).trim() : "";
+        let itemsToProcess = Array.isArray(items) ? [...items] : [];
+        if (orderType === "DINE_IN" && normalizedTableNumber !== "QUICK" && settings?.defaultOrderItems) {
+          const def = settings.defaultOrderItems as { menuItems?: Array<{ menuItemId: string; quantity: number }> };
+          if (def.menuItems && def.menuItems.length > 0) {
+            const defaultItems = def.menuItems.map((m) => ({
+              menuItemId: m.menuItemId,
+              quantity: m.quantity,
+              notes: "" as string,
+              extras: {} as Record<string, unknown>,
+            }));
+            itemsToProcess = [...defaultItems, ...itemsToProcess];
+            console.log(`[socket-service] Merged ${def.menuItems.length} default menu items for table order`);
+          }
+        }
+
+        if (itemsToProcess.length === 0) {
+          socket.emit("order_error", { message: "At least one item is required" });
+          return;
+        }
         
         // Calculate total tax percentage
         let totalTaxPercentage = 0;
@@ -346,7 +368,7 @@ export const setupSocketHandlers = (io: Server) => {
 
         // Validate and create order items with discount and tax calculation
         let totalPriceInclusive = 0;
-        const orderItems = items.map((item: any) => {
+        const orderItems = itemsToProcess.map((item: any) => {
           // Find menu item in all categories
           let foundItem: any = null;
           for (const category of menu.categories) {
@@ -484,7 +506,7 @@ export const setupSocketHandlers = (io: Server) => {
           orderData.qrCode = { connect: { id: qrCodeId } };
         }
 
-        const order = await prisma.order.create({
+        let order = await prisma.order.create({
           data: orderData,
           include: {
             restaurant: true,
@@ -522,6 +544,83 @@ export const setupSocketHandlers = (io: Server) => {
         });
 
         console.log(`📋 Order created with qrCodeId: ${qrCodeId}`);
+
+        // Add default custom services for DINE_IN table orders (not QUICK)
+        const defaultCustomServices =
+          orderType === "DINE_IN" &&
+          normalizedTableNumber !== "QUICK" &&
+          settings?.defaultOrderItems
+            ? (settings.defaultOrderItems as {
+                customServices?: Array<{
+                  name: string;
+                  nameAr?: string;
+                  price: number;
+                  quantity: number;
+                }>;
+              })?.customServices
+            : undefined;
+        if (defaultCustomServices && defaultCustomServices.length > 0) {
+          let addedTotal = 0;
+          for (const s of defaultCustomServices) {
+            const itemTotal = Number(s.price) * Number(s.quantity);
+            addedTotal += itemTotal;
+            await prisma.orderItem.create({
+              data: {
+                orderId: order.id,
+                quantity: Number(s.quantity),
+                price: Number(s.price),
+                notes: null,
+                isCustomItem: true,
+                customItemName: s.name,
+                customItemNameAr: s.nameAr ?? s.name,
+                menuItemId: null,
+                kitchenItemStatus: "PENDING" as any,
+              },
+            });
+          }
+          const newTotal = Number(order.totalPrice ?? 0) + addedTotal;
+          await prisma.order.update({
+            where: { id: order.id },
+            data: { totalPrice: newTotal },
+          });
+          order = await prisma.order.findUniqueOrThrow({
+            where: { id: order.id },
+            include: {
+              restaurant: true,
+              items: {
+                include: {
+                  menuItem: {
+                    select: {
+                      id: true,
+                      name: true,
+                      nameAr: true,
+                      description: true,
+                      descriptionAr: true,
+                      price: true,
+                      image: true,
+                      sortOrder: true,
+                      isAvailable: true,
+                      discount: true,
+                      extras: true,
+                      categoryId: true,
+                      category: {
+                        select: {
+                          id: true,
+                          name: true,
+                          nameAr: true,
+                        },
+                      },
+                      createdAt: true,
+                      updatedAt: true,
+                    },
+                  },
+                },
+              },
+              qrCode: true,
+            },
+          }) as any;
+          console.log(`[socket-service] Added ${defaultCustomServices.length} default custom services to order`);
+        }
 
         console.log(`[socket-service] Order created: ${order.id}`);
 

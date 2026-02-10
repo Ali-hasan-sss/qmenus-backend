@@ -262,12 +262,13 @@ model RestaurantTheme {
 }
 
 model RestaurantSettings {
-  id           String     @id @default(cuid())
-  taxes        Json?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  restaurantId String     @unique
-  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  id                 String     @id @default(cuid())
+  taxes              Json?
+  defaultOrderItems  Json?      // { menuItems: [{ menuItemId, quantity }], customServices: [{ name, nameAr?, price, quantity }] } - for DINE_IN table orders only
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  restaurantId       String     @unique
+  restaurant         Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   @@map("restaurant_settings")
 }

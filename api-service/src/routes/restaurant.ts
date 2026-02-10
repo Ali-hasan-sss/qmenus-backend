@@ -81,6 +81,7 @@ router.put(
         website,
         kitchenWhatsApp,
         currency,
+        logo,
       } = req.body;
 
       // Build update data object - only include fields that are provided
@@ -96,6 +97,7 @@ router.put(
       if (website !== undefined) updateData.website = website;
       if (kitchenWhatsApp !== undefined)
         updateData.kitchenWhatsApp = kitchenWhatsApp;
+      if (logo !== undefined) updateData.logo = logo === "" ? null : logo;
 
       // Always update currency if provided
       if (currency !== undefined && currency !== null && currency !== "") {

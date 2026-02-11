@@ -1077,12 +1077,48 @@ router.delete("/plans/:id", async (req: AuthRequest, res): Promise<any> => {
 // Get all subscriptions
 router.get("/subscriptions", async (req: AuthRequest, res) => {
   try {
-    const { page = 1, limit = 25, status } = req.query;
+    const { page = 1, limit = 25, status, search } = req.query;
 
-    const whereClause: any = {};
+    const andConditions: any[] = [];
     if (status && status !== "ALL") {
-      whereClause.status = status;
+      andConditions.push({ status });
     }
+    const searchTerm =
+      typeof search === "string" ? search.trim() : "";
+    if (searchTerm) {
+      andConditions.push({
+        OR: [
+          {
+            restaurant: {
+              owner: {
+                email: { contains: searchTerm, mode: "insensitive" },
+              },
+            },
+          },
+          {
+            restaurant: {
+              owner: {
+                firstName: { contains: searchTerm, mode: "insensitive" },
+              },
+            },
+          },
+          {
+            restaurant: {
+              owner: {
+                lastName: { contains: searchTerm, mode: "insensitive" },
+              },
+            },
+          },
+          {
+            restaurant: {
+              name: { contains: searchTerm, mode: "insensitive" },
+            },
+          },
+        ],
+      });
+    }
+    const whereClause =
+      andConditions.length > 0 ? { AND: andConditions } : {};
 
     const subscriptions = await prisma.subscription.findMany({
       where: whereClause,

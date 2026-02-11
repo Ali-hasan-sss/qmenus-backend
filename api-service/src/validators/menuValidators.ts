@@ -105,9 +105,9 @@ export const createMenuItemSchema = Joi.object({
   descriptionAr: Joi.string().max(500).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 500 characters",
   }),
-  price: Joi.number().positive().precision(2).required().messages({
+  price: Joi.number().min(0).precision(2).required().messages({
     "number.base": "Price must be a number",
-    "number.positive": "Price must be positive",
+    "number.min": "Price cannot be negative",
     "any.required": "Price is required",
   }),
   image: Joi.alternatives()
@@ -158,9 +158,9 @@ export const updateMenuItemSchema = Joi.object({
   descriptionAr: Joi.string().max(500).allow("").optional().messages({
     "string.max": "Arabic description cannot exceed 500 characters",
   }),
-  price: Joi.number().positive().precision(2).required().messages({
+  price: Joi.number().min(0).precision(2).required().messages({
     "number.base": "Price must be a number",
-    "number.positive": "Price must be positive",
+    "number.min": "Price cannot be negative",
     "any.required": "Price is required",
   }),
   image: Joi.alternatives()

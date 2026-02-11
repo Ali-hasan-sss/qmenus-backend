@@ -13,6 +13,7 @@ import { getClientIp } from "../helpers/ipHelpers";
 import {
   createOrderSchema,
   updateOrderStatusSchema,
+  updateOrderItemPriceSchema,
 } from "../validators/orderValidators";
 // Socket.io will be handled by socket-service
 // import { io } from "../index";
@@ -374,8 +375,12 @@ router.post(
         // Step 2: Extract price without tax from tax-inclusive price
         // Step 3: Apply discount to price without tax
         // Step 4: Store final tax-inclusive price after discount
-        const originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
-        
+        let originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
+        // Variable-price items (e.g. weight-based): menu price is 0, client sends price for this order line only
+        if (originalPriceInclusive === 0 && item.price != null && typeof item.price === "number" && item.price >= 0) {
+          originalPriceInclusive = Number(item.price);
+        }
+
         // Get discount from menuItem (at order creation time)
         // IMPORTANT: menuItem.discount can be a Decimal from Prisma, so we need to convert it properly
         let discountValue = 0;
@@ -1748,8 +1753,12 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
       // Step 2: Extract price without tax from tax-inclusive price
       // Step 3: Apply discount to price without tax
       // Step 4: Store final tax-inclusive price after discount
-      const originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
-      
+      let originalPriceInclusive = Number(menuItem.price); // Tax-inclusive price from menu
+      // Variable-price items (e.g. weight-based): menu price is 0, client sends price for this order line only
+      if (originalPriceInclusive === 0 && item.price != null && typeof item.price === "number" && item.price >= 0) {
+        originalPriceInclusive = Number(item.price);
+      }
+
       // Get restaurant settings for tax calculation
       const settings = await prisma.restaurantSettings.findUnique({
         where: { restaurantId: order.restaurantId },
@@ -2007,6 +2016,114 @@ router.put("/:id/add-items", async (req, res): Promise<any> => {
     });
   }
 });
+
+// Update order item price (only for variable-price items where menu item price is 0, e.g. weight-based)
+router.patch(
+  "/:id/items/:itemId/price",
+  authenticate,
+  requireRestaurant,
+  validateRequest(updateOrderItemPriceSchema),
+  async (req: AuthRequest, res): Promise<any> => {
+    try {
+      const { id: orderId, itemId } = req.params;
+      const { price } = req.body;
+      const restaurantId = req.user!.restaurantId!;
+
+      const order = await prisma.order.findFirst({
+        where: { id: orderId, restaurantId },
+        include: { items: { include: { menuItem: { select: { price: true } } } } },
+      });
+
+      if (!order) {
+        return res.status(404).json({ success: false, message: "Order not found" });
+      }
+      if (order.status === "CANCELLED" || order.status === "COMPLETED") {
+        return res.status(400).json({
+          success: false,
+          message: "Cannot update price for cancelled or completed orders",
+        });
+      }
+
+      const orderItem = order.items.find((i: { id: string; menuItemId: string | null; menuItem: { price: unknown } | null }) => i.id === itemId);
+      if (!orderItem || orderItem.menuItemId == null) {
+        return res.status(404).json({ success: false, message: "Order item not found" });
+      }
+
+      const menuItemPrice = orderItem.menuItem ? Number((orderItem.menuItem as { price: unknown }).price) : null;
+      if (menuItemPrice !== 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Only variable-price items (menu price 0) can have their price updated in the order",
+        });
+      }
+
+      const newPrice = Number(price);
+      await prisma.orderItem.update({
+        where: { id: itemId },
+        data: { price: newPrice },
+      });
+
+      const allItems = await prisma.orderItem.findMany({
+        where: { orderId },
+        select: { price: true, quantity: true },
+      });
+      const totalPrice = allItems.reduce(
+        (sum: number, i: { price: unknown; quantity: unknown }) => sum + Number(i.price) * Number(i.quantity),
+        0
+      );
+      const updatedOrder = await prisma.order.update({
+        where: { id: orderId },
+        data: { totalPrice },
+        include: {
+          items: {
+            include: {
+              menuItem: {
+                select: { id: true, name: true, nameAr: true, price: true, discount: true, extras: true },
+              },
+            },
+          },
+        },
+      });
+
+      // Notify socket-service so customer sees price update in real time
+      try {
+        const axios = require("axios");
+        const socketServiceUrl =
+          env.SOCKET_SERVICE_URL ||
+          `http://localhost:${env.SOCKET_PORT || "5001"}`;
+        const qrCodeId =
+          (updatedOrder as any).qrCode?.id ?? (updatedOrder as any).qrCodeId ?? null;
+        await axios.post(`${socketServiceUrl}/api/emit-order-update`, {
+          order: updatedOrder,
+          updatedBy: "restaurant",
+          timestamp: new Date().toISOString(),
+          restaurantId: (updatedOrder as any).restaurantId,
+          qrCodeId,
+        });
+        console.log(
+          "✅ Order item price update emitted to customer (table) and restaurant"
+        );
+      } catch (socketError: any) {
+        console.error(
+          "⚠️ Socket notification error (order item price):",
+          socketError?.message || socketError
+        );
+      }
+
+      res.json({
+        success: true,
+        message: "Order item price updated",
+        data: { order: updatedOrder },
+      });
+    } catch (error) {
+      console.error("Update order item price error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
+    }
+  }
+);
 
 // Add custom item to existing order (for restaurant use - fees, extras, etc.)
 router.post(

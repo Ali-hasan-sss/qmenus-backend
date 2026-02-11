@@ -39,6 +39,11 @@ export const createOrderSchema = Joi.object({
           "string.max": "Item notes cannot exceed 200 characters",
         }),
         extras: Joi.object().optional(),
+        // When menu item price is 0 (e.g. weight-based), send tax-inclusive price for this order line only
+        price: Joi.number().min(0).precision(2).optional().messages({
+          "number.base": "Price must be a number",
+          "number.min": "Price cannot be negative",
+        }),
       })
     )
     .min(1)
@@ -107,6 +112,14 @@ export const updateOrderStatusSchema = Joi.object({
         "Status must be one of: PENDING, PREPARING, READY, DELIVERED, COMPLETED, CANCELLED",
       "any.required": "Status is required",
     }),
+});
+
+export const updateOrderItemPriceSchema = Joi.object({
+  price: Joi.number().min(0).precision(2).required().messages({
+    "number.base": "Price must be a number",
+    "number.min": "Price cannot be negative",
+    "any.required": "Price is required",
+  }),
 });
 
 export const getOrdersSchema = Joi.object({

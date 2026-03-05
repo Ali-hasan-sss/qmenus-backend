@@ -7,6 +7,32 @@ import { deleteUploadIfUnused } from "../utils/uploadCleanup";
 
 const router = express.Router();
 
+// Helper: allow absolute URLs OR relative upload paths (e.g. /uploads/...)
+const imageUrlSchema = Joi.string()
+  .required()
+  .custom((value, helpers) => {
+    // Allow relative paths starting with /uploads/
+    if (value.startsWith("/uploads/")) {
+      return value;
+    }
+
+    // Allow full HTTP/HTTPS URLs
+    try {
+      const url = new URL(value);
+      if (url.protocol === "http:" || url.protocol === "https:") {
+        return value;
+      }
+    } catch {
+      // fall through to error
+    }
+
+    return helpers.error("string.uri");
+  })
+  .messages({
+    "any.required": "Image URL is required",
+    "string.uri": "Must be a valid URL or relative upload path (e.g. /uploads/...)",
+  });
+
 // Validation schemas
 const createGallerySchema = Joi.object({
   name: Joi.string().required().messages({
@@ -16,10 +42,7 @@ const createGallerySchema = Joi.object({
     "any.required": "Arabic name is required",
   }),
   description: Joi.string().allow("").optional(),
-  imageUrl: Joi.string().uri().required().messages({
-    "any.required": "Image URL is required",
-    "string.uri": "Must be a valid URL",
-  }),
+  imageUrl: imageUrlSchema,
   category: Joi.string().optional().default("general"),
   tags: Joi.string().allow("").optional(),
 });
@@ -28,7 +51,7 @@ const updateGallerySchema = Joi.object({
   name: Joi.string().optional(),
   nameAr: Joi.string().optional(),
   description: Joi.string().allow("").optional(),
-  imageUrl: Joi.string().uri().optional(),
+  imageUrl: imageUrlSchema.optional(),
   category: Joi.string().optional(),
   tags: Joi.string().allow("").optional(),
   isActive: Joi.boolean().optional(),

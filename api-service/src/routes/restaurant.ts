@@ -80,8 +80,10 @@ router.put(
         email,
         website,
         kitchenWhatsApp,
+        customerWhatsApp,
         currency,
         logo,
+        socialLinks,
       } = req.body;
 
       // Build update data object - only include fields that are provided
@@ -97,7 +99,32 @@ router.put(
       if (website !== undefined) updateData.website = website;
       if (kitchenWhatsApp !== undefined)
         updateData.kitchenWhatsApp = kitchenWhatsApp;
+      if (customerWhatsApp !== undefined)
+        updateData.customerWhatsApp =
+          customerWhatsApp === "" ? null : customerWhatsApp;
       if (logo !== undefined) updateData.logo = logo === "" ? null : logo;
+
+      if (socialLinks !== undefined) {
+        const allowed = [
+          "facebook",
+          "instagram",
+          "twitter",
+          "tiktok",
+          "youtube",
+          "snapchat",
+        ] as const;
+        const cleaned: Record<string, string> = {};
+        if (socialLinks && typeof socialLinks === "object") {
+          for (const key of allowed) {
+            const v = (socialLinks as Record<string, unknown>)[key];
+            if (typeof v === "string" && v.trim().length > 0) {
+              cleaned[key] = v.trim();
+            }
+          }
+        }
+        updateData.socialLinks =
+          Object.keys(cleaned).length > 0 ? cleaned : null;
+      }
 
       // Always update currency if provided
       if (currency !== undefined && currency !== null && currency !== "") {

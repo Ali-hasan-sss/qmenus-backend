@@ -48,6 +48,10 @@ model Restaurant {
   updatedAt         DateTime            @updatedAt
   ownerId           String
   kitchenWhatsApp   String?
+  /// Customer-facing WhatsApp (E.164); shown on public menu; separate from kitchen line
+  customerWhatsApp  String?
+  /// Optional map of social profile URLs, e.g. { "facebook": "https://...", "instagram": "..." }
+  socialLinks       Json?
   categories        Category[]
   invoices          Invoice[]
   menu_items        MenuItem[]

@@ -48,6 +48,19 @@ export const updateRestaurantSchema = Joi.object({
   kitchenWhatsApp: Joi.string().allow("").optional().messages({
     "string.base": "Kitchen WhatsApp must be a valid string",
   }),
+  customerWhatsApp: Joi.string().allow("").optional().messages({
+    "string.base": "Customer WhatsApp must be a valid string",
+  }),
+  socialLinks: Joi.object({
+    facebook: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+    instagram: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+    twitter: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+    tiktok: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+    youtube: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+    snapchat: Joi.string().uri({ scheme: ["http", "https"] }).max(500).allow("").optional(),
+  })
+    .optional()
+    .allow(null),
 });
 
 export const createQRCodeSchema = Joi.object({

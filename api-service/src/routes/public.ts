@@ -288,6 +288,11 @@ router.get("/menu/:restaurantId", async (req, res): Promise<any> => {
           descriptionAr: restaurant.descriptionAr,
           logo: restaurant.logo,
           theme: restaurant.theme,
+          phone: restaurant.phone ?? null,
+          customerWhatsApp:
+            (restaurant as { customerWhatsApp?: string | null })
+              .customerWhatsApp ?? null,
+          socialLinks: (restaurant as { socialLinks?: unknown }).socialLinks ?? null,
         },
         tableNumber: tableNumber || null,
         menus,
@@ -384,6 +389,11 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
           descriptionAr: restaurant.descriptionAr,
           logo: restaurant.logo,
           currency: (restaurant as any).currency || "USD",
+          phone: restaurant.phone ?? null,
+          customerWhatsApp:
+            (restaurant as { customerWhatsApp?: string | null })
+              .customerWhatsApp ?? null,
+          socialLinks: (restaurant as { socialLinks?: unknown }).socialLinks ?? null,
         },
         categories,
         menuTheme: menuTheme || DEFAULT_THEME,
@@ -610,6 +620,11 @@ router.get(
             descriptionAr: restaurant.descriptionAr,
             logo: restaurant.logo,
             theme: restaurant.theme,
+            phone: restaurant.phone ?? null,
+            customerWhatsApp:
+              (restaurant as { customerWhatsApp?: string | null })
+                .customerWhatsApp ?? null,
+            socialLinks: (restaurant as { socialLinks?: unknown }).socialLinks ?? null,
           },
           tableNumber,
           menus,
@@ -672,6 +687,11 @@ router.get("/restaurant/:restaurantId", async (req, res): Promise<any> => {
           descriptionAr: restaurant.descriptionAr,
           logo: restaurant.logo,
           theme: restaurant.theme,
+          phone: restaurant.phone ?? null,
+          customerWhatsApp:
+            (restaurant as { customerWhatsApp?: string | null })
+              .customerWhatsApp ?? null,
+          socialLinks: (restaurant as { socialLinks?: unknown }).socialLinks ?? null,
         },
       },
     });

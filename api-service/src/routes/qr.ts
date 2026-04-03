@@ -9,6 +9,7 @@ import {
 import { validateRequest } from "../middleware/validateRequest";
 import { createQRCodeSchema } from "../validators/restaurantValidators";
 import { validatePlanLimits } from "../middleware/planLimits";
+import { sortByTableNumber } from "../utils/sortByTableNumber";
 
 const router = express.Router();
 
@@ -320,7 +321,7 @@ router.get(
       res.json({
         success: true,
         data: {
-          qrCodes: qrCodesWithImages,
+          qrCodes: sortByTableNumber(qrCodesWithImages),
         },
       });
     } catch (error) {
@@ -1014,7 +1015,7 @@ router.post(
         success: true,
         message: `${qrCodes.length} QR codes generated successfully`,
         data: {
-          qrCodes,
+          qrCodes: sortByTableNumber(qrCodes),
           skipped: existingTableNumbers.length,
         },
       });

@@ -11,7 +11,7 @@
     "prisma:seed": "dotenv -e ../.env -- npx prisma@5.22.0 db seed --schema ./prisma/schema.prisma",
     "prisma:format": "npx prisma@5.22.0 format --schema ./prisma/schema.prisma",
     "prisma:validate": "npx prisma@5.22.0 validate --schema ./prisma/schema.prisma",
-    "prisma:migrate:resolve": "dotenv -e ../.env -- npx prisma@5.22.0 migrate resolve --applied 20260105225327_add_is_occupied_to_qrcode --schema ./prisma/schema.prisma"
+    "prisma:migrate:resolve": "dotenv -e ../.env -- npx prisma@5.22.0 migrate resolve --schema ./prisma/schema.prisma"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

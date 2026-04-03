@@ -197,3 +197,7 @@ playwright/.cache/
 .svelte-kit
 
 # End of https://www.gitignore.io/api/node,nextjs
+
+# Uploaded files (UPLOAD_DIR / public /uploads)
+/uploads/
+uploads/

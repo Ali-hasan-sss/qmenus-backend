@@ -53,3 +53,8 @@ backups/
 # Temporary files
 *.tmp
 *.temp
+
+# User uploads (images, QR assets, etc. — do not commit)
+uploads/
+api-service/uploads/
+**/uploads/

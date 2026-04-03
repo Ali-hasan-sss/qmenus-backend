@@ -49,6 +49,9 @@ Thumbs.db
 # Backups
 backups/
 *.sql
+# Prisma migrate files are .sql — must be tracked for deploy
+!shared/prisma/migrations/**/*.sql
+!shared/prisma/SERVER_MANUAL_*.sql
 
 # Temporary files
 *.tmp

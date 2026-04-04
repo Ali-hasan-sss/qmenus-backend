@@ -708,27 +708,7 @@ router.post(
           qrCodeId: order.qrCodeId,
         });
 
-        // Also emit KDS update to trigger visual/audio effects
-        console.log(
-          `📤 Sending KDS update with source: ${
-            isQuickOrder ? "restaurant" : "customer"
-          } for new order ${order.id}`
-        );
-        await axios.post(`${baseUrl}/api/emit-kds-update`, {
-          orderItem: {
-            id: "new-order",
-            order: order,
-          },
-          restaurantId: restaurantId,
-          timestamp: new Date().toISOString(),
-          source: isQuickOrder ? "restaurant" : "customer", // Indicate source of order
-          orderId: order.id,
-        });
-        console.log(
-          `✅ KDS update sent with source: ${
-            isQuickOrder ? "restaurant" : "customer"
-          } for new order`
-        );
+        // KDS: new orders stay PENDING on dashboard until cashier sets PREPARING — no kds_update here
       } catch (socketError: any) {
         console.error(
           "⚠️ Socket notification error (create):",
@@ -2399,6 +2379,23 @@ router.put(
             restaurantId: restaurantId,
             qrCodeId: updatedOrder.qrCodeId,
           });
+
+          // Release to kitchen display: refresh KDS + optional notification sound
+          if (status === "PREPARING") {
+            await axios.post(`${baseUrl}/api/emit-kds-update`, {
+              orderItem: {
+                id: "released-to-kitchen",
+                order: updatedOrder,
+              },
+              restaurantId,
+              timestamp: new Date().toISOString(),
+              source: "restaurant",
+              orderId: id,
+            });
+            console.log(
+              `✅ Order ${id} released to kitchen (PREPARING), KDS update emitted`
+            );
+          }
         }
       } catch (socketError: any) {
         console.error(

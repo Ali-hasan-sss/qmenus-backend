@@ -645,27 +645,7 @@ export const setupSocketHandlers = (io: Server) => {
           message: isQuickOrder ? "Quick order received" : "New order received",
         });
 
-        // Emit KDS update to trigger visual/audio effects
-        console.log(
-          `📤 [Socket] Sending KDS update with source: ${
-            isQuickOrder ? "restaurant" : "customer"
-          } for new order ${order.id}`
-        );
-        io.to(`restaurant_${restaurantId}`).emit("kds_update", {
-          orderItem: {
-            id: "new-order",
-            order: order,
-          },
-          restaurantId: restaurantId,
-          timestamp: new Date().toISOString(),
-          source: isQuickOrder ? "restaurant" : "customer", // Indicate source of order
-          orderId: order.id,
-        });
-        console.log(
-          `✅ [Socket] KDS update sent with source: ${
-            isQuickOrder ? "restaurant" : "customer"
-          } for new order`
-        );
+        // KDS: orders start PENDING; cashier must set PREPARING before kitchen display shows them
       } catch (error: any) {
         console.error("[socket-service] Create order error:", error);
         socket.emit("order_error", {

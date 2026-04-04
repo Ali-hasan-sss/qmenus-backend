@@ -285,14 +285,12 @@ router.get(
         });
       }
 
-      // Get active orders with status PENDING or PREPARING only
-      // Exclude READY, COMPLETED, and CANCELLED orders as they are finished
+      // Only orders explicitly released to the kitchen (PREPARING+).
+      // PENDING = on dashboard only until cashier sends to kitchen display.
       const orders = await prisma.order.findMany({
         where: {
           restaurantId,
-          status: {
-            in: ["PENDING", "PREPARING"],
-          },
+          status: "PREPARING",
         },
         include: {
           items: {

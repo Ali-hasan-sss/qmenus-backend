@@ -6,7 +6,7 @@ export const DEFAULT_THEME = {
   showImages: true,
   showDescriptions: true,
   primaryColor: "#f6b23c",
-  secondaryColor: "#27ae1e",
+  secondaryColor: "#9d622a",
   backgroundColor: "#ffb36b",
   textColor: "#1F2937",
   accentColor: "#F59E0B",

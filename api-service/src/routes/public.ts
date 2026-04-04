@@ -1,12 +1,25 @@
 import express, { Response } from "express";
 import prisma from "../../../shared/config/db";
 import { DEFAULT_THEME } from "../constants/defaultTheme";
+import { getPlanLimits } from "../middleware/planLimits";
 import {
   sendContactUsEmail,
   sendContactUsEmailEN,
 } from "../helpers/emailHelpers";
 
 const router = express.Router();
+
+/** Customer-facing theme: use platform default when plan does not allow customization. */
+async function getCustomerMenuTheme(restaurantId: string) {
+  const dbTheme = await prisma.menuTheme.findUnique({
+    where: { restaurantId },
+  });
+  const limits = await getPlanLimits(restaurantId);
+  if (!limits?.canCustomizeTheme) {
+    return DEFAULT_THEME;
+  }
+  return dbTheme ?? DEFAULT_THEME;
+}
 
 // List public restaurants (active + active subscription), optional search by name
 router.get("/restaurants", async (req, res): Promise<any> => {
@@ -270,12 +283,7 @@ router.get("/menu/:restaurantId", async (req, res): Promise<any> => {
       orderBy: { createdAt: "asc" },
     });
 
-    // Get menu theme
-    const menuTheme = await prisma.menuTheme.findUnique({
-      where: {
-        restaurantId,
-      },
-    });
+    const menuTheme = await getCustomerMenuTheme(restaurantId);
 
     res.json({
       success: true,
@@ -296,7 +304,7 @@ router.get("/menu/:restaurantId", async (req, res): Promise<any> => {
         },
         tableNumber: tableNumber || null,
         menus,
-        menuTheme: menuTheme || DEFAULT_THEME,
+        menuTheme,
       },
     });
   } catch (error) {
@@ -371,12 +379,7 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
       },
     });
 
-    // Get menu theme
-    const menuTheme = await prisma.menuTheme.findUnique({
-      where: {
-        restaurantId,
-      },
-    });
+    const menuTheme = await getCustomerMenuTheme(restaurantId);
 
     res.json({
       success: true,
@@ -396,7 +399,7 @@ router.get("/menu/:restaurantId/categories", async (req, res): Promise<any> => {
           socialLinks: (restaurant as { socialLinks?: unknown }).socialLinks ?? null,
         },
         categories,
-        menuTheme: menuTheme || DEFAULT_THEME,
+        menuTheme,
         currency: (restaurant as any).currency || "USD",
       },
     });

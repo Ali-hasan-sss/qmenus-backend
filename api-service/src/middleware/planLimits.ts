@@ -19,7 +19,9 @@ interface AuthenticatedRequest extends Request {
 }
 
 // Helper function to get active subscription and plan limits
-async function getPlanLimits(restaurantId: string): Promise<PlanLimits | null> {
+export async function getPlanLimits(
+  restaurantId: string
+): Promise<PlanLimits | null> {
   try {
     // Get the most recent active subscription (latest created)
     const subscription = await prisma.subscription.findFirst({
